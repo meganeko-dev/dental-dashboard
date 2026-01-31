@@ -62,19 +62,6 @@ export default function Dashboard() {
   const [historyData, setHistoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
-  // 初期化: オプションViewからクリニック一覧を取得
-  // useEffect(() => {
-  //   const init = async () => {
-  //     const { data } = await supabase.from('unique_clinic_options').select('clinic_name')
-  //     const names = Array.from(new Set(data?.map(d => d.clinic_name))).sort()
-  //     setClinics(names)
-  //     if (names.length > 0) {
-  //       setTargetClinic(names[0])
-  //       setCompareClinic(names[1] || names[0])
-  //     }
-  //   }
-  //   init()
-  // }, [])
   // init関数の中を以下のように修正
   useEffect(() => {
     const init = async () => {
@@ -139,8 +126,8 @@ export default function Dashboard() {
               <p className="text-xs font-bold text-slate-400 tracking-widest uppercase italic">Performance Report</p>
             </div>
             <div className="flex flex-col gap-2">
-              <a href="/staff" className="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Staff View 👤</a>
-              <a href="/admin" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</a>
+              <Link href="/staff" className="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Staff View 👤</Link>
+              <Link href="/admin" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</Link>
             </div>
           </div>
           <div className="flex flex-wrap gap-4 items-end">
