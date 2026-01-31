@@ -28,6 +28,22 @@ const DASHBOARD_TABS = [
       { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
       { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
     ]
+  },
+  {
+    id: 'continuity',
+    label: '継続性',
+    items: [
+      { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
+      { id: 'churn_patients_count', label: '離脱患者数', unit: '名' },
+    ]
+  },
+  {
+    id: 'efficiency',
+    label: '効率性',
+    items: [
+      { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
+      { id: 'util_rate', label: '稼働率', unit: '%' },
+    ]
   }
 ]
 
