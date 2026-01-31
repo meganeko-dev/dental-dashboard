@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { useState, useEffect } from 'react'
 import { KpiCard } from '@/components/dashboard/KpiCard'
 import { KpiEngine } from '@/lib/kpi-engine'
+import Link from 'next/link'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const supabase = createClient(
