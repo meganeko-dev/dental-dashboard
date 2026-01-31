@@ -49,10 +49,10 @@ const DASHBOARD_TABS = [
   }
 ];
 
-export default function Dashboard() {
-  const [clinics, setClinics] = useState<string[]>([])
-  const [targetClinic, setTargetClinic] = useState('')
-  const [compareClinic, setCompareClinic] = useState('')
+export default function StaffDashboard() {
+  const [staffOptions, setStaffOptions] = useState<{label: string, value: string, clinic: string}[]>([])
+  const [targetStaff, setTargetStaff] = useState('')
+  const [compareStaff, setCompareStaff] = useState('')
   const [selectedYear, setSelectedYear] = useState(2025)
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
@@ -61,60 +61,105 @@ export default function Dashboard() {
   const [prevData, setPrevData] = useState<any>(null)
   const [historyData, setHistoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [clinics, setClinics] = useState<string[]>([]) // これが足りなかった
+  const [targetClinic, setTargetClinic] = useState('') // これが足りなかった
+  const [compareClinic, setCompareClinic] = useState('') // これが足りなかった
+  const [staffs, setStaffs] = useState<string[]>([]) // スタッフ一覧用
 
-  // 初期化: オプションViewからクリニック一覧を取得
-  // useEffect(() => {
-  //   const init = async () => {
-  //     const { data } = await supabase.from('unique_clinic_options').select('clinic_name')
-  //     const names = Array.from(new Set(data?.map(d => d.clinic_name))).sort()
-  //     setClinics(names)
-  //     if (names.length > 0) {
-  //       setTargetClinic(names[0])
-  //       setCompareClinic(names[1] || names[0])
-  //     }
-  //   }
-  //   init()
-  // }, [])
-  // init関数の中を以下のように修正
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data } = await supabase.from('unique_staff_options').select('staff_name, clinic_name')
+      if (data) {
+        const sortedData = [...data].sort((a, b) => {
+          if (a.clinic_name !== b.clinic_name) {
+            return a.clinic_name.localeCompare(b.clinic_name, 'ja');
+          }
+          return a.staff_name.localeCompare(b.staff_name, 'ja');
+        });
+
+        const options = sortedData.map(d => ({
+          label: `${d.staff_name} / ${d.clinic_name}`,
+          value: d.staff_name,
+          clinic: d.clinic_name
+        }));
+        setStaffOptions(options);
+        if (options.length > 0) {
+          setTargetStaff(options[0].value);
+          setCompareStaff(options[1]?.value || options[0].value);
+        }
+      }
+    };
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!targetStaff) return;
+      setLoading(true);
+      const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
+        supabase.from('summarized_staff_kpi').select('*').eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
+        supabase.from('summarized_staff_kpi').select('*').eq('staff_name', compareStaff).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
+        supabase.from('summarized_staff_kpi').select('*').eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth - 1).maybeSingle(),
+        supabase.from('summarized_staff_kpi').select('*').eq('staff_name', targetStaff).eq('year', selectedYear).order('month', { ascending: true })
+      ]);
+      setTargetData(targetRes.data);
+      setCompData(compRes.data);
+      setPrevData(prevRes.data);
+      setHistoryData(historyRes.data || []);
+      setLoading(false);
+    };
+    fetchData();
+  }, [targetStaff, compareStaff, selectedYear, selectedMonth]);
+
   useEffect(() => {
     const init = async () => {
-      const { data } = await supabase.from('unique_clinic_options').select('clinic_name')
-      const names = Array.from(new Set(data?.map(d => d.clinic_name))).sort()
-      setClinics(names)
+      // 1. スタッフViewからユニークなクリニックとスタッフの組み合わせを取得
+      const { data, error } = await supabase
+        .from('unique_staff_options')
+        .select('clinic_name, staff_name')
       
-      if (names.length > 0) {
-        setTargetClinic(names[0])
-        setCompareClinic(names[1] || names[0])
-        // ここではsetLoading(false)は呼びません（fetchDataが走るため）
+      if (error) {
+        console.error('Error fetching options:', error)
+        setLoading(false)
+        return
+      }
+
+      if (data && data.length > 0) {
+        // クリニック一覧を抽出してセット
+        const clinicNames = Array.from(new Set(data.map(d => d.clinic_name))).sort()
+        setClinics(clinicNames)
+        
+        // 最初のクリニックをターゲットに設定
+        const initialClinic = clinicNames[0]
+        setTargetClinic(initialClinic)
+        setCompareClinic(clinicNames[1] || initialClinic)
+
+        // そのクリニックに所属するスタッフ一覧を抽出してセット
+        const staffInClinic = data
+          .filter(d => d.clinic_name === initialClinic)
+          .map(d => d.staff_name)
+          .sort()
+        
+        setStaffs(staffInClinic)
+
+        if (staffInClinic.length > 0) {
+          setTargetStaff(staffInClinic[0])
+          setCompareStaff(staffInClinic[1] || staffInClinic[0])
+          // fetchData() は targetStaff がセットされた後の別の useEffect で動くはずですが、
+          // 安全のためにここで一度呼ぶか、loadingを自動で切るロジックが必要です。
+        } else {
+          setLoading(false)
+        }
       } else {
-        // データが0件の場合は、ここでローディングを終了させる
+        // データが0件の場合
+        setClinics([])
+        setStaffs([])
         setLoading(false)
       }
     }
+
     init()
   }, [])
-
-  // データ取得: Viewから直接取得
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!targetClinic) return
-      setLoading(true)
-
-      const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
-        supabase.from('summarized_clinic_kpi').select('*').eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth - 1).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
-      ])
-      
-      setTargetData(targetRes.data)
-      setCompData(compRes.data)
-      setPrevData(prevRes.data)
-      setHistoryData(historyRes.data || [])
-      setLoading(false)
-    }
-    fetchData()
-  }, [targetClinic, compareClinic, selectedYear, selectedMonth])
 
   const chartData = Array.from({ length: 12 }, (_, i) => {
     const m = i + 1;
@@ -122,28 +167,31 @@ export default function Dashboard() {
     return {
       name: `${m}月`,
       売上: monthly?.total_amount || 0,
-      来院人数: monthly?.patients_count || 0 // Viewのカラム名 patients_count に修正
+      来院人数: monthly?.patients_count || 0
     };
   });
 
-  if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
+  if (loading && staffOptions.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Staff Analytics...</div>
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        <header className="flex flex-wrap justify-between items-end bg-white p-8 rounded-3xl shadow-sm border border-slate-200 gap-6">
-          <div className="flex gap-6 items-start">
+        <header className="flex flex-wrap justify-between items-end bg-white p-8 rounded-3xl shadow-sm border border-slate-200 gap-4">
+          <div className="flex gap-4 items-start">
             <div className="space-y-1">
-              <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase italic">KPI Dashboard</h1>
+              {/* text-blue-600からtext-slate-900へ修正 */}
+              <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase italic">Staff Analytics</h1>
               <p className="text-xs font-bold text-slate-400 tracking-widest uppercase italic">Performance Report</p>
             </div>
             <div className="flex flex-col gap-2">
-              <a href="/staff" className="bg-blue-100 hover:bg-blue-200 text-blue-600 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Staff View 👤</a>
+              <a href="/" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Clinic View 🏥</a>
               <a href="/admin" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</a>
             </div>
           </div>
-          <div className="flex flex-wrap gap-4 items-end">
+          
+          {/* フィールド群の隙間(gap-3)を調整 */}
+          <div className="flex flex-wrap gap-3 items-end">
             <div className="flex flex-col gap-1">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
@@ -155,11 +203,13 @@ export default function Dashboard() {
                 </select>
               </div>
             </div>
-            <SelectBox label="対象クリニック" value={targetClinic} onChange={setTargetClinic} options={clinics} highlight />
-            <SelectBox label="比較対象" value={compareClinic} onChange={setCompareClinic} options={clinics} />
+            {/* スタッフ選択フィールドの幅を固定し、長い名前を溢れさせない */}
+            <SelectBox label="対象スタッフ / クリニック" value={targetStaff} onChange={setTargetStaff} options={staffOptions} highlight />
+            <SelectBox label="比較スタッフ / クリニック" value={compareStaff} onChange={setCompareStaff} options={staffOptions} />
           </div>
         </header>
 
+        {/* 以降のグラフ、タブ、カードエリアは共通ロジックのため変更なし */}
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-80">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData}>
@@ -197,7 +247,7 @@ export default function Dashboard() {
                 forecast={0}
                 compVal={compVal}
                 achievement={mom}
-                compareClinic={compareClinic}
+                compareClinic={compareStaff} 
                 isCountKpi={isCountKpi}
                 prevVal={prevVal}
                 goalVal={0}
@@ -211,14 +261,22 @@ export default function Dashboard() {
   )
 }
 
+// 共通SelectBox: max-widthを設定し、溢れた文字を隠す
 function SelectBox({ label, value, onChange, options, highlight }: any) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
-      {/* <select value={value} onChange={e => onChange(e.target.value)} className={`border-none rounded-2xl px-4 py-2.5 h-[42px] text-xs font-black outline-none cursor-pointer shadow-sm transition-all min-w-[200px] ${highlight ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}> */}
-      <select value={value} onChange={e => onChange(e.target.value)} className={`border-none rounded-2xl px-4 py-2.5 h-[42px] text-xs font-black outline-none cursor-pointer shadow-sm transition-all min-w-[200px] ${highlight ? 'bg-sky-100 text-black' : 'bg-slate-100 text-slate700'}`}>
-        {options.map((name: string) => <option key={name} value={name} className="text-slate-800">{name}</option>)}
-      </select>
-    </div>
-  )
-}
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
+        <select 
+          value={value} 
+          onChange={e => onChange(e.target.value)} 
+          className={`border-none rounded-2xl px-4 py-2.5 h-[42px] text-xs font-black outline-none cursor-pointer shadow-sm transition-all w-[200px] max-w-[200px] overflow-hidden whitespace-nowrap ${highlight ? 'bg-sky-100 text-black' : 'bg-slate-100 text-slate-700'}`}
+        >
+          {options.map((opt: any) => (
+            <option key={opt.label} value={opt.value} className="text-slate-800">
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
+  }
