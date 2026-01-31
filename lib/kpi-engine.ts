@@ -13,7 +13,7 @@ export const KpiEngine = {
       .reduce((sum, d) => sum + (Number(d.value) || 0), 0);
   },
 
-  calc: (data: any[], kpiId: string) => {
+  calc: (data: any[], kpiId: string): number => {
     switch (kpiId) {
       case 'revenue': // 売上
         // DBにある売上関連の名称をすべて網羅
