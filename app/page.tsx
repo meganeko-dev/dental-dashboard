@@ -23,10 +23,14 @@
 //     id: 'booking',
 //     label: '予約精度',
 //     items: [
-//       { id: 'reserved_patients_count', label: '予約取得患者', unit: '名' },
-//       { id: 'reserved_rate', label: '予約率', unit: '%' },
-//       { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
+//       { id: 'reserved_count', label: '予約数', unit: '名' },
+//       { id: 'visit_rate', label: '来院率', unit: '%' },
+//       { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
 //       { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
+//       { id: 'noshow_cancel_rate', label: '無断キャンセル率', unit: '%' },
+//       { id: 'prior_cancel_rate', label: '事前キャンセル率', unit: '%' },
+//       { id: 'next_reserve_count', label: '次回予約取得数', unit: '件' },
+//       { id: 'next_reserve_rate', label: '次回予約取得率', unit: '%' },
 //     ]
 //   },
 //   {
@@ -68,7 +72,6 @@
 //     window.location.href = '/login'
 //   }
 
-//   // 1. 初期データ取得 (医院リスト)
 //   useEffect(() => {
 //     if (authLoading || !corpId) return
 
@@ -91,7 +94,6 @@
 //     init()
 //   }, [corpId, authLoading, supabase])
 
-//   // 2. メインデータ取得
 //   useEffect(() => {
 //     if (!targetClinic || !corpId || authLoading) return
 //     setLoading(true)
@@ -122,6 +124,14 @@
 //       来院人数: monthly?.patients_count || 0
 //     };
 //   });
+
+//   const calcForecastLocal = (history: any[], kpiId: string, currentMonth: number) => {
+//     const pastData = history.filter(h => h.month < currentMonth && (h[kpiId] || 0) > 0);
+//     if (pastData.length === 0) return 0;
+//     const recent = pastData.slice(-3);
+//     const sum = recent.reduce((acc, curr) => acc + (Number(curr[kpiId]) || 0), 0);
+//     return Math.round(sum / recent.length);
+//   };
 
 //   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
 //   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -156,7 +166,7 @@
 //               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
 //               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
 //                 <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
-//                   {[2024, 2025].map(y => <option key={y} value={y}>{y}年</option>)}
+//                   {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
 //                 </select>
 //                 <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
 //                   {Array.from({length: 12}, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}月</option>)}
@@ -200,13 +210,15 @@
 //             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
 //             const mom = KpiEngine.calcRatio(val, prevVal)
 
+//             const forecast = calcForecastLocal(historyData, kpi.id, selectedMonth);
+
 //             return (
 //               <KpiCard
 //                 key={kpi.id}
 //                 label={kpi.label}
 //                 value={val}
 //                 unit={kpi.unit}
-//                 forecast={0}
+//                 forecast={forecast}
 //                 compVal={compVal}
 //                 achievement={mom}
 //                 compareClinic={compareClinic}
@@ -215,6 +227,7 @@
 //                 goalVal={0}
 //                 mom={mom}
 //                 mode={mode}
+//                 hideCompare={mode === 'single'}
 //               />
 //             )
 //           })}
@@ -260,10 +273,14 @@ const DASHBOARD_TABS = [
     id: 'booking',
     label: '予約精度',
     items: [
-      { id: 'reserved_patients_count', label: '予約取得患者', unit: '名' },
-      { id: 'reserved_rate', label: '予約率', unit: '%' },
-      { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
+      { id: 'reserved_count', label: '予約数', unit: '名' },
+      { id: 'visit_rate', label: '来院率', unit: '%' },
+      { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
       { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
+      { id: 'noshow_cancel_rate', label: '無断キャンセル率', unit: '%' },
+      { id: 'prior_cancel_rate', label: '事前キャンセル率', unit: '%' },
+      { id: 'next_reserve_count', label: '次回予約取得数', unit: '件' },
+      { id: 'next_reserve_rate', label: '次回予約取得率', unit: '%' },
     ]
   },
   {
@@ -271,9 +288,10 @@ const DASHBOARD_TABS = [
     label: '稼働・離脱',
     items: [
       { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
-      { id: 'util_rate', label: '稼働率', unit: '%' },
+      // { id: 'util_rate', label: '稼働率', unit: '%' },
+      { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
-      { id: 'churn_patients_count', label: '離脱患者数', unit: '名' },
+     
     ]
   }
 ]
@@ -293,9 +311,11 @@ export default function Dashboard() {
   const [selectedYear, setSelectedYear] = useState(2025)
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
-  const [targetData, setTargetData] = useState<any>(null)
-  const [compData, setCompData] = useState<any>(null)
-  const [prevData, setPrevData] = useState<any>(null)
+  
+  // 取得したデータは配列になるため初期値を[]に
+  const [targetData, setTargetData] = useState<any[]>([])
+  const [compData, setCompData] = useState<any[]>([])
+  const [prevData, setPrevData] = useState<any[]>([])
   const [historyData, setHistoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -305,7 +325,6 @@ export default function Dashboard() {
     window.location.href = '/login'
   }
 
-  // 1. 初期データ取得 (医院リスト)
   useEffect(() => {
     if (authLoading || !corpId) return
 
@@ -328,49 +347,38 @@ export default function Dashboard() {
     init()
   }, [corpId, authLoading, supabase])
 
-  // 2. メインデータ取得
   useEffect(() => {
     if (!targetClinic || !corpId || authLoading) return
     setLoading(true)
 
     const fetchData = async () => {
+      // 取得先を flexible_kpis に変更し、複数行のデータを取得する
       const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
-        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth - 1).maybeSingle(),
-        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth - 1),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
       ])
       
-      setTargetData(targetRes.data)
-      setCompData(compRes.data)
-      setPrevData(prevRes.data)
+      setTargetData(targetRes.data || [])
+      setCompData(compRes.data || [])
+      setPrevData(prevRes.data || [])
       setHistoryData(historyRes.data || [])
       setLoading(false)
     }
     fetchData()
   }, [targetClinic, compareClinic, selectedYear, selectedMonth, corpId, authLoading, supabase])
 
+  // グラフ用のデータも KpiEngine を使って月ごとに計算
   const chartData = Array.from({ length: 12 }, (_, i) => {
     const m = i + 1;
-    const monthly = historyData.find(h => h.month === m);
+    const monthlyData = historyData.filter(h => h.month === m);
     return {
       name: `${m}月`,
-      売上: monthly?.total_amount || 0,
-      来院人数: monthly?.patients_count || 0
+      売上: KpiEngine.calc(monthlyData, 'total_amount'),
+      来院人数: KpiEngine.calc(monthlyData, 'patients_count')
     };
   });
-
-  // ■追加: 着地予測計算用のローカル関数 (summarized_clinic_kpiの形式に対応)
-  const calcForecastLocal = (history: any[], kpiId: string, currentMonth: number) => {
-    const pastData = history.filter(h => h.month < currentMonth && (h[kpiId] || 0) > 0);
-    
-    if (pastData.length === 0) return 0;
-    
-    // 直近3ヶ月の平均を取得
-    const recent = pastData.slice(-3);
-    const sum = recent.reduce((acc, curr) => acc + (Number(curr[kpiId]) || 0), 0);
-    return Math.round(sum / recent.length);
-  };
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -405,7 +413,7 @@ export default function Dashboard() {
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
                 <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
-                  {[2024, 2025].map(y => <option key={y} value={y}>{y}年</option>)}
+                  {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
                 </select>
                 <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
                   {Array.from({length: 12}, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}月</option>)}
@@ -443,14 +451,16 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-            const val = targetData?.[kpi.id] || 0
-            const compVal = compData?.[kpi.id] || 0
-            const prevVal = prevData?.[kpi.id] || 0
+            // ■ KpiEngine.calc を使って配列データから目的の数値を計算
+            const val = KpiEngine.calc(targetData, kpi.id)
+            const compVal = KpiEngine.calc(compData, kpi.id)
+            const prevVal = KpiEngine.calc(prevData, kpi.id)
+            
             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
             const mom = KpiEngine.calcRatio(val, prevVal)
 
-            // ■修正: 着地予測を計算
-            const forecast = calcForecastLocal(historyData, kpi.id, selectedMonth);
+            // KpiEngine.calculateForecast を使用
+            const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
 
             return (
               <KpiCard
@@ -458,7 +468,7 @@ export default function Dashboard() {
                 label={kpi.label}
                 value={val}
                 unit={kpi.unit}
-                forecast={forecast} // 計算結果を渡す
+                forecast={forecast}
                 compVal={compVal}
                 achievement={mom}
                 compareClinic={compareClinic}
@@ -467,6 +477,7 @@ export default function Dashboard() {
                 goalVal={0}
                 mom={mom}
                 mode={mode}
+                hideCompare={mode === 'single'}
               />
             )
           })}

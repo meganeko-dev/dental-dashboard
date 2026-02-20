@@ -1,9 +1,8 @@
-// src/lib/kpi-engine.ts
-
 export const KPI_NAMES = [
-  '保険点数売上', '自費売上', '自費売上（税込・入金）', '来院患者数',
-  '新患数', '新規患者数', '予約取得率', '当日キャンセル率', '離脱率',
-  'ユニット稼働率', '予約取得患者', '初回メンテ移行数', '保険売上'
+  '保険治療', '自費治療', 'レセプト', '来院人数_既存患者', '来院人数_新規患者',
+  '予約人数_既存患者', '予約人数_新規患者', '当日キャンセル数', '当日キャンセル人数',
+  '無断キャンセル数', '無断キャンセル人数', '事前キャンセル数', '事前キャンセル人数',
+  '次回予約取得数', '次回予約取得人数', '次回予約取得率', 'チェア稼働率'
 ];
 
 export const KpiEngine = {
@@ -15,44 +14,66 @@ export const KpiEngine = {
 
   calc: (data: any[], kpiId: string): number => {
     switch (kpiId) {
-      case 'revenue': // 売上
-        // DBにある売上関連の名称をすべて網羅
-        return KpiEngine.sumValues(data, ['保険点数売上', '自費売上', '自費売上（税込・入金）', '保険売上']);
+      case 'total_amount': // 売上
+        return KpiEngine.sumValues(data, ['保険治療', '自費治療']);
+      
+      case 'recept_price': // レセプト単価
+        const rec_rev = KpiEngine.sumValues(data, ['保険治療', '自費治療']);
+        const rec_num = KpiEngine.sumValues(data, ['レセプト']);
+        return rec_num > 0 ? rec_rev / rec_num : 0;
+      
+      case 'avg_price': // 平均単価
+        const avg_rev = KpiEngine.sumValues(data, ['保険治療', '自費治療']);
+        const avg_pat = KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
+        return avg_pat > 0 ? avg_rev / avg_pat : 0;
+      
+      case 'patients_count': // 来院数
+        return KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
 
-      case 'recept_unit_price':
-          // 売上 / レセプト数 (レセプト数がDBにない場合は0を返す)
-          const r_rev = KpiEngine.calc(data, 'revenue');
-          const r_num = KpiEngine.sumValues(data, ['レセプト数']);
-          return r_num > 0 ? r_rev / r_num : 0;
-      case 'average_unit_price':
-          // 売上 / 来院数
-          const a_rev = KpiEngine.calc(data, 'revenue');
-          const a_pts = KpiEngine.sumValues(data, ['来院患者数']);
-          return a_pts > 0 ? a_rev / a_pts : 0;
-      
-      case 'unit_price': // レセプト平均単価
-        const rev = KpiEngine.calc(data, 'revenue');
-        const pts = KpiEngine.sumValues(data, ['来院患者数']);
-        return pts > 0 ? rev / pts : 0;
-      
-      case 'patients': // 来院患者数
-        return KpiEngine.sumValues(data, ['来院患者数']);
-      
-      case 'new_patients': // 新規患者数
-        return KpiEngine.sumValues(data, ['新患数', '新規患者数']);
-      
-      case 'cancel_rate': // キャンセル率（もしDBに「キャンセル率」という名前がない場合は「当日キャンセル率」を代替表示）
-        const cRate = KpiEngine.sumValues(data, ['キャンセル率']);
-        return cRate > 0 ? cRate : KpiEngine.sumValues(data, ['当日キャンセル率']);
-      
+      case 'reserved_count': // 予約数
+        return KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+
+      case 'visit_rate': // 来院率
+        const visit_pat = KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
+        const res_pat = KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+        return res_pat > 0 ? (visit_pat / res_pat) * 100 : 0;
+
+      case 'cancel_rate': // キャンセル率
+        const c_num = KpiEngine.sumValues(data, ['当日キャンセル数', '当日キャンセル人数', '無断キャンセル数', '無断キャンセル人数']);
+        const res_c = KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+        return res_c > 0 ? (c_num / res_c) * 100 : 0;
+
       case 'today_cancel_rate': // 当日キャンセル率
-        return KpiEngine.sumValues(data, ['当日キャンセル率']);
-      
-      case 'reserve_rate': // 予約取得率 (settingsのID: reserve_rate と DBの 予約取得率 を紐付け)
-        return KpiEngine.sumValues(data, ['予約取得率']);
-      
+        const tc_num = KpiEngine.sumValues(data, ['当日キャンセル数', '当日キャンセル人数']);
+        const res_tc = KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+        return res_tc > 0 ? (tc_num / res_tc) * 100 : 0;
+
+      case 'noshow_cancel_rate': // 無断キャンセル率
+        const ns_num = KpiEngine.sumValues(data, ['無断キャンセル数', '無断キャンセル人数']);
+        const res_ns = KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+        return res_ns > 0 ? (ns_num / res_ns) * 100 : 0;
+
+      case 'prior_cancel_rate': // 事前キャンセル率
+        const pc_num = KpiEngine.sumValues(data, ['事前キャンセル数', '事前キャンセル人数']);
+        const res_pc = KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
+        return res_pc > 0 ? (pc_num / res_pc) * 100 : 0;
+
+      case 'next_reserve_count': // 次回予約取得数
+        return KpiEngine.sumValues(data, ['次回予約取得数', '次回予約取得人数']);
+
+      case 'next_reserve_rate': // 次回予約取得率
+        return KpiEngine.sumValues(data, ['次回予約取得率']);
+
+      case 'chair_util_rate': // チェア稼働率
+        return KpiEngine.sumValues(data, ['チェア稼働率']);
+
+      case 'churn_patients_count': // 離脱数
+        return KpiEngine.sumValues(data, ['離脱患者']);
+
+      case 'churn_patients_rate': // 離脱率
+        return KpiEngine.sumValues(data, ['離脱率']);
+
       default:
-        // IDがDBの日本語名と直接一致する場合
         return KpiEngine.sumValues(data, [kpiId]);
     }
   },
@@ -72,15 +93,19 @@ export const KpiEngine = {
     });
 
     const history = Array.from(monthlyMap.keys()).map(key => {
-      const [y, m] = key.split('-').map(Number);
-      return { 
-        x: y * 12 + m, 
-        y: KpiEngine.calc(monthlyMap.get(key), kpiId), 
-        isPast: (y < currentYear || (y === currentYear && m < currentMonth)) 
+      const [y, m] = key.split('-');
+      return {
+        year: parseInt(y),
+        month: parseInt(m),
+        value: KpiEngine.calc(monthlyMap.get(key), kpiId)
       };
-    }).filter(d => d.isPast && d.y > 0);
-    
-    if (history.length < 2) return null; // 2ヶ月分以上あれば平均を出す
-    return history.slice(-3).reduce((s, d) => s + d.y, 0) / history.slice(-3).length;
+    }).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+
+    const pastData = history.filter(h => (h.year < currentYear) || (h.year === currentYear && h.month < currentMonth));
+    if (pastData.length === 0) return null;
+
+    const recent = pastData.slice(-3);
+    const sum = recent.reduce((acc, curr) => acc + curr.value, 0);
+    return sum / recent.length;
   }
 };

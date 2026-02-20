@@ -58,11 +58,6 @@
 //     window.location.href = '/login'
 //   }
 
-//   // デバッグ用ログ: この画面が開かれているか、モードは何かを確認
-//   useEffect(() => {
-//     console.log("🟢 StaffDashboard Mounted. Mode:", mode, "CorpId:", corpId);
-//   }, [mode, corpId]);
-
 //   useEffect(() => {
 //     if (authLoading || !corpId) return
 
@@ -80,13 +75,14 @@
 //           return a.staff_name.localeCompare(b.staff_name, 'ja');
 //         });
 
-//         // ■修正: シングルモードの場合は「スタッフ名」のみ、マルチの場合は「スタッフ名 / クリニック名」
+//         // モード判定によるラベル切り替え
 //         const options = sortedData.map(d => ({
 //           label: mode === 'single' ? d.staff_name : `${d.staff_name} / ${d.clinic_name}`,
 //           value: d.staff_name,
 //           clinic: d.clinic_name
 //         }));
 //         setStaffOptions(options);
+        
 //         if (options.length > 0) {
 //           setTargetStaff(options[0].value);
 //           setCompareStaff(options[1]?.value || options[0].value);
@@ -127,6 +123,19 @@
 //       来院人数: monthly?.patients_count || 0
 //     };
 //   });
+
+//   // 着地予測計算用のローカル関数 (summarized_staff_kpiの形式に対応)
+//   const calcForecastLocal = (history: any[], kpiId: string, currentMonth: number) => {
+//     // 過去の実績データを抽出（現在月より前、かつ値が0より大きい）
+//     const pastData = history.filter(h => h.month < currentMonth && (h[kpiId] || 0) > 0);
+    
+//     if (pastData.length === 0) return 0;
+    
+//     // 直近3ヶ月の平均を取得
+//     const recent = pastData.slice(-3);
+//     const sum = recent.reduce((acc, curr) => acc + (Number(curr[kpiId]) || 0), 0);
+//     return Math.round(sum / recent.length);
+//   };
 
 //   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
 //   if (loading && staffOptions.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Staff Analytics...</div>
@@ -172,18 +181,21 @@
 //           </div>
 //         </header>
 
-//         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-80">
-//           <ResponsiveContainer width="100%" height="100%">
-//             <ComposedChart data={chartData}>
-//               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-//               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 'bold', fill: '#94a3b8'}} />
-//               <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
-//               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
-//               <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
-//               <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
-//               <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
-//             </ComposedChart>
-//           </ResponsiveContainer>
+//         {/* 修正: Rechartsの親要素に明示的な高さを指定 */}
+//         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px]" style={{ minHeight: '400px' }}>
+//           <div style={{ width: '100%', height: '100%' }}>
+//             <ResponsiveContainer width="100%" height="100%">
+//               <ComposedChart data={chartData}>
+//                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+//                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 'bold', fill: '#94a3b8'}} />
+//                 <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
+//                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
+//                 <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+//                 <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
+//                 <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+//               </ComposedChart>
+//             </ResponsiveContainer>
+//           </div>
 //         </div>
 
 //         <div className="flex gap-2 p-1 bg-slate-200/50 rounded-2xl w-fit">
@@ -200,8 +212,8 @@
 //             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
 //             const mom = KpiEngine.calcRatio(val, prevVal)
             
-//             // ■修正: 着地予測を計算してKpiCardに渡す
-//             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
+//             // 修正: ローカル計算ロジックを使用
+//             const forecast = calcForecastLocal(historyData, kpi.id, selectedMonth);
 
 //             return (
 //               <KpiCard
@@ -217,7 +229,7 @@
 //                 prevVal={prevVal}
 //                 goalVal={0}
 //                 mom={mom}
-//                 mode={mode} // モードを渡す
+//                 mode={mode}
 //               />
 //             )
 //           })}
@@ -271,10 +283,24 @@ const DASHBOARD_TABS = [
     id: 'booking',
     label: '予約精度',
     items: [
-      { id: 'reserved_patients_count', label: '予約取得患者', unit: '名' },
-      { id: 'reserved_rate', label: '予約率', unit: '%' },
-      { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
+      { id: 'reserved_count', label: '予約数', unit: '名' },
+      { id: 'visit_rate', label: '来院率', unit: '%' },
+      { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
       { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
+      { id: 'noshow_cancel_rate', label: '無断キャンセル率', unit: '%' },
+      { id: 'prior_cancel_rate', label: '事前キャンセル率', unit: '%' },
+      { id: 'next_reserve_count', label: '次回予約取得数', unit: '件' },
+      { id: 'next_reserve_rate', label: '次回予約取得率', unit: '%' },
+    ]
+  },
+  {
+    id: 'utilization',
+    label: '稼働・離脱',
+    items: [
+      { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
+      // { id: 'util_rate', label: '稼働率', unit: '%' },
+      { id: 'churn_patients_count', label: '離脱数', unit: '名' },
+      { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
     ]
   }
 ]
@@ -294,9 +320,11 @@ export default function StaffDashboard() {
   const [selectedYear, setSelectedYear] = useState(2025)
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
-  const [targetData, setTargetData] = useState<any>(null)
-  const [compData, setCompData] = useState<any>(null)
-  const [prevData, setPrevData] = useState<any>(null)
+  
+  // 取得データを配列として保持するための初期化
+  const [targetData, setTargetData] = useState<any[]>([])
+  const [compData, setCompData] = useState<any[]>([])
+  const [prevData, setPrevData] = useState<any[]>([])
   const [historyData, setHistoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -306,6 +334,7 @@ export default function StaffDashboard() {
     window.location.href = '/login'
   }
 
+  // 元の正しい50音順ソート処理とラベル設定を完全復元
   useEffect(() => {
     if (authLoading || !corpId) return
 
@@ -323,7 +352,6 @@ export default function StaffDashboard() {
           return a.staff_name.localeCompare(b.staff_name, 'ja');
         });
 
-        // モード判定によるラベル切り替え
         const options = sortedData.map(d => ({
           label: mode === 'single' ? d.staff_name : `${d.staff_name} / ${d.clinic_name}`,
           value: d.staff_name,
@@ -346,44 +374,33 @@ export default function StaffDashboard() {
     setLoading(true);
     
     const fetchData = async () => {
+      // 取得先を flexible_kpis に変更。staff_nameに不正な文字が混ざらないため正しく取得されます
       const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('year', selectedYear).eq('month', selectedMonth).maybeSingle(),
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth - 1).maybeSingle(),
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).order('month', { ascending: true })
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth - 1),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).order('month', { ascending: true })
       ]);
       
-      setTargetData(targetRes.data);
-      setCompData(compRes.data);
-      setPrevData(prevRes.data);
+      setTargetData(targetRes.data || []);
+      setCompData(compRes.data || []);
+      setPrevData(prevRes.data || []);
       setHistoryData(historyRes.data || []);
       setLoading(false);
     };
     fetchData();
   }, [targetStaff, compareStaff, selectedYear, selectedMonth, corpId, supabase]);
 
+  // KpiEngineを使用してグラフデータを計算
   const chartData = Array.from({ length: 12 }, (_, i) => {
     const m = i + 1;
-    const monthly = historyData.find(h => h.month === m);
+    const monthlyData = historyData.filter(h => h.month === m);
     return {
       name: `${m}月`,
-      売上: monthly?.total_amount || 0,
-      来院人数: monthly?.patients_count || 0
+      売上: KpiEngine.calc(monthlyData, 'total_amount'),
+      来院人数: KpiEngine.calc(monthlyData, 'patients_count')
     };
   });
-
-  // 着地予測計算用のローカル関数 (summarized_staff_kpiの形式に対応)
-  const calcForecastLocal = (history: any[], kpiId: string, currentMonth: number) => {
-    // 過去の実績データを抽出（現在月より前、かつ値が0より大きい）
-    const pastData = history.filter(h => h.month < currentMonth && (h[kpiId] || 0) > 0);
-    
-    if (pastData.length === 0) return 0;
-    
-    // 直近3ヶ月の平均を取得
-    const recent = pastData.slice(-3);
-    const sum = recent.reduce((acc, curr) => acc + (Number(curr[kpiId]) || 0), 0);
-    return Math.round(sum / recent.length);
-  };
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && staffOptions.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Staff Analytics...</div>
@@ -417,7 +434,7 @@ export default function StaffDashboard() {
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
                 <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
-                  {[2024, 2025].map(y => <option key={y} value={y}>{y}年</option>)}
+                  {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
                 </select>
                 <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
                   {Array.from({length: 12}, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}月</option>)}
@@ -429,7 +446,6 @@ export default function StaffDashboard() {
           </div>
         </header>
 
-        {/* 修正: Rechartsの親要素に明示的な高さを指定 */}
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px]" style={{ minHeight: '400px' }}>
           <div style={{ width: '100%', height: '100%' }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -454,14 +470,14 @@ export default function StaffDashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-            const val = targetData?.[kpi.id] || 0
-            const compVal = compData?.[kpi.id] || 0
-            const prevVal = prevData?.[kpi.id] || 0
+            const val = KpiEngine.calc(targetData, kpi.id)
+            const compVal = KpiEngine.calc(compData, kpi.id)
+            const prevVal = KpiEngine.calc(prevData, kpi.id)
+            
             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
             const mom = KpiEngine.calcRatio(val, prevVal)
             
-            // 修正: ローカル計算ロジックを使用
-            const forecast = calcForecastLocal(historyData, kpi.id, selectedMonth);
+            const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
 
             return (
               <KpiCard
@@ -472,7 +488,7 @@ export default function StaffDashboard() {
                 forecast={forecast}
                 compVal={compVal}
                 achievement={mom}
-                compareClinic={compareStaff} 
+                compareClinic={staffOptions.find(s => s.value === compareStaff)?.label || ''} 
                 isCountKpi={isCountKpi}
                 prevVal={prevVal}
                 goalVal={0}
@@ -487,6 +503,7 @@ export default function StaffDashboard() {
   )
 }
 
+// 元の正しいUIとvalue構造を完全復元
 function SelectBox({ label, value, onChange, options, highlight }: any) {
     return (
       <div className="flex flex-col gap-1">
