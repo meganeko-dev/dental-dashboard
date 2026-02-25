@@ -278,7 +278,7 @@ const DASHBOARD_TABS = [
     label: '収益性',
     items: [
       { id: 'total_amount', label: '売上', unit: '円' },
-      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, 
+      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, // 💡 ここに追加
       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
@@ -309,9 +309,11 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
+      // { id: 'util_rate', label: '稼働率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
       { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
+     
     ]
   }
 ]

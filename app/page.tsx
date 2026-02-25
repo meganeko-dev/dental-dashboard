@@ -273,8 +273,9 @@ const DASHBOARD_TABS = [
     label: '収益性',
     items: [
       { id: 'total_amount', label: '売上', unit: '円' },
-      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' },
+      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, // 💡 ここに追加
       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
+      { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
       { id: 'patients_count', label: '来院数', unit: '名' },
     ]
@@ -283,24 +284,31 @@ const DASHBOARD_TABS = [
     id: 'booking',
     label: '予約精度',
     items: [
-      { id: 'reserved_count', label: '予約数', unit: '名' },
+      { id: 'reserved_count', label: '当月の予約数', unit: '名' },
       { id: 'visit_rate', label: '来院率', unit: '%' },
-      { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
-      { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
-      { id: 'noshow_cancel_rate', label: '無断キャンセル率', unit: '%' },
-      { id: 'prior_cancel_rate', label: '事前キャンセル率', unit: '%' },
       { id: 'next_reserve_count', label: '次回予約取得数', unit: '件' },
       { id: 'next_reserve_rate', label: '次回予約取得率', unit: '%' },
+      { id: 'cancel_count', label: 'キャンセル数', unit: '件' },
+      { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
+      { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
+      { id: 'today_cancel_rate', label: '当日キャンセル率', unit: '%' },
+      { id: 'noshow_cancel_count', label: '無断キャンセル数', unit: '件' },
+      { id: 'noshow_cancel_rate', label: '無断キャンセル率', unit: '%' },
+      { id: 'prior_cancel_count', label: '事前キャンセル数', unit: '件' },
+      { id: 'prior_cancel_rate', label: '事前キャンセル率', unit: '%' },
     ]
   },
   {
     id: 'utilization',
-    label: '稼働・離脱',
+    label: 'メンテ・稼働・離脱',
     items: [
-      { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
-      { id: 'util_rate', label: '稼働率', unit: '%' },
+      { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
+      { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
+      // { id: 'util_rate', label: '稼働率', unit: '%' },
+      { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
-      { id: 'churn_patients_count', label: '離脱患者数', unit: '名' },
+      { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
+     
     ]
   }
 ]
