@@ -5,7 +5,8 @@
 // import { KpiEngine } from '@/lib/kpi-engine'
 // import Link from 'next/link'
 // import { useRouter } from 'next/navigation'
-// import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+// // 💡 Legend をインポートに追加
+// import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 // import { useAuth } from '@/context/AuthContext'
 
 // const DASHBOARD_TABS = [
@@ -70,7 +71,6 @@
 //   const [selectedMonth, setSelectedMonth] = useState(6)
 //   const [activeTab, setActiveTab] = useState('profitability')
   
-//   // 取得したデータは配列になるため初期値を[]に
 //   const [targetData, setTargetData] = useState<any[]>([])
 //   const [compData, setCompData] = useState<any[]>([])
 //   const [prevData, setPrevData] = useState<any[]>([])
@@ -110,12 +110,11 @@
 //     setLoading(true)
 
 //     const fetchData = async () => {
-//       // 取得先を flexible_kpis に変更し、複数行のデータを取得する
 //       const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
-//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth),
-//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
-//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth - 1),
-//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
+//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
+//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
+//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth - 1),
+//         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).order('month', { ascending: true })
 //       ])
       
 //       setTargetData(targetRes.data || [])
@@ -127,14 +126,17 @@
 //     fetchData()
 //   }, [targetClinic, compareClinic, selectedYear, selectedMonth, corpId, authLoading, supabase])
 
-//   // グラフ用のデータも KpiEngine を使って月ごとに計算
 //   const chartData = Array.from({ length: 12 }, (_, i) => {
 //     const m = i + 1;
 //     const monthlyData = historyData.filter(h => h.month === m);
 //     return {
 //       name: `${m}月`,
 //       売上: KpiEngine.calc(monthlyData, 'total_amount'),
-//       来院人数: KpiEngine.calc(monthlyData, 'patients_count')
+//       来院人数: KpiEngine.calc(monthlyData, 'patients_count'),
+//       次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate'),
+//       キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate'),
+//       メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate'),
+//       離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate')
 //     };
 //   });
 
@@ -195,8 +197,28 @@
 //               <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
 //               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
 //               <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
-//               <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
-//               <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+              
+//               {/* 💡 グラフ上部に項目名（凡例）を追加 */}
+//               <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
+
+//               {activeTab === 'profitability' && (
+//                 <>
+//                   <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
+//                   <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+//                 </>
+//               )}
+//               {activeTab === 'booking' && (
+//                 <>
+//                   <Line yAxisId="left" type="linear" dataKey="次回予約取得率" stroke="#4185f4" strokeWidth={3} dot={{r: 4, fill: '#4185f4'}} />
+//                   <Line yAxisId="right" type="linear" dataKey="キャンセル率" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+//                 </>
+//               )}
+//               {activeTab === 'utilization' && (
+//                 <>
+//                   <Line yAxisId="left" type="linear" dataKey="メンテナンス率" stroke="#34a853" strokeWidth={3} dot={{r: 4, fill: '#34a853'}} />
+//                   <Line yAxisId="right" type="linear" dataKey="離脱率" stroke="#fbbc04" strokeWidth={3} dot={{r: 4, fill: '#fbbc04'}} />
+//                 </>
+//               )}
 //             </ComposedChart>
 //           </ResponsiveContainer>
 //         </div>
@@ -209,7 +231,6 @@
 
 //         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 //           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-//             // ■ KpiEngine.calc を使って配列データから目的の数値を計算
 //             const val = KpiEngine.calc(targetData, kpi.id)
 //             const compVal = KpiEngine.calc(compData, kpi.id)
 //             const prevVal = KpiEngine.calc(prevData, kpi.id)
@@ -217,7 +238,6 @@
 //             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
 //             const mom = KpiEngine.calcRatio(val, prevVal)
 
-//             // KpiEngine.calculateForecast を使用
 //             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
 
 //             return (
@@ -263,7 +283,6 @@ import { KpiCard } from '@/components/dashboard/KpiCard'
 import { KpiEngine } from '@/lib/kpi-engine'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-// 💡 Legend をインポートに追加
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
 
@@ -273,7 +292,7 @@ const DASHBOARD_TABS = [
     label: '収益性',
     items: [
       { id: 'total_amount', label: '売上', unit: '円' },
-      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, // 💡 ここに追加
+      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' },
       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
@@ -304,11 +323,9 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
-      // { id: 'util_rate', label: '稼働率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
       { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
-     
     ]
   }
 ]
@@ -329,6 +346,7 @@ export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
   
+  const [goals, setGoals] = useState<Record<string, number>>({}) // 💡 目標値を保存するStateを追加
   const [targetData, setTargetData] = useState<any[]>([])
   const [compData, setCompData] = useState<any[]>([])
   const [prevData, setPrevData] = useState<any[]>([])
@@ -359,6 +377,19 @@ export default function Dashboard() {
       } else {
         setLoading(false)
       }
+
+      // 💡 Admin画面で保存された目標値（data_mappings）を取得する処理を追加
+      const { data: goalData } = await supabase
+        .from('data_mappings')
+        .select('key, value')
+        .eq('mapping_type', 'kpi_goal')
+        .eq('corporation_id', corpId)
+      
+      const formattedGoals: Record<string, number> = {}
+      goalData?.forEach(d => {
+        formattedGoals[d.key] = Number(d.value)
+      })
+      setGoals(formattedGoals)
     }
     init()
   }, [corpId, authLoading, supabase])
@@ -369,10 +400,10 @@ export default function Dashboard() {
 
     const fetchData = async () => {
       const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth - 1),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth - 1),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).order('month', { ascending: true })
       ])
       
       setTargetData(targetRes.data || [])
@@ -456,7 +487,6 @@ export default function Dashboard() {
               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
               <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
               
-              {/* 💡 グラフ上部に項目名（凡例）を追加 */}
               <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 
               {activeTab === 'profitability' && (
@@ -496,6 +526,10 @@ export default function Dashboard() {
             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
             const mom = KpiEngine.calcRatio(val, prevVal)
 
+            // 💡 目標値の取得と、パーセンテージKPI用の目標達成率の計算を追加
+            const goal = goals[kpi.label] || 0
+            const achievement = isCountKpi ? mom : KpiEngine.calcRatio(val, goal)
+
             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
 
             return (
@@ -506,11 +540,11 @@ export default function Dashboard() {
                 unit={kpi.unit}
                 forecast={forecast}
                 compVal={compVal}
-                achievement={mom}
+                achievement={achievement} // 💡 変更（目標達成率を渡す）
                 compareClinic={compareClinic}
                 isCountKpi={isCountKpi}
                 prevVal={prevVal}
-                goalVal={0}
+                goalVal={goal} // 💡 変更（0固定から取得した目標値へ変更）
                 mom={mom}
                 mode={mode}
                 hideCompare={mode === 'single'}

@@ -100,7 +100,7 @@ const supabase = createClient(
 )
 
 export function GoalSetter({ corpId }: { corpId: string }) {
-  const targetKPIs = ["メンテナンス移行率", "キャンセル率", "予約取得率", "離脱率", "当日キャンセル率"];
+  const targetKPIs = ["来院率", "メンテナンス率", "キャンセル率", "次回予約取得率", "離脱率", "当日キャンセル率", "チェア稼働率"];
   
   const [goals, setGoals] = useState<Record<string, number>>({})
   const [editing, setEditing] = useState<Record<string, number>>({})
@@ -159,9 +159,15 @@ export function GoalSetter({ corpId }: { corpId: string }) {
               <tr key={kpi} className="hover:bg-slate-50 transition-colors">
                 <td className="p-5 font-bold text-slate-700">{kpi}</td>
                 <td className="p-5 text-right">
-                  <input 
+                  {/* <input 
                     type="number" 
                     value={editing[kpi] ?? goals[kpi] ?? 0} 
+                    onChange={e => setEditing({...editing, [kpi]: parseFloat(e.target.value)})} 
+                    className="border rounded-lg px-3 py-2 text-sm w-28 text-right font-black focus:ring-2 focus:ring-blue-600 outline-none shadow-sm transition-all"
+                  /> */}
+                  <input 
+                    type="number" 
+                    value={Number.isNaN(editing[kpi]) ? '' : (editing[kpi] ?? goals[kpi] ?? 0)} 
                     onChange={e => setEditing({...editing, [kpi]: parseFloat(e.target.value)})} 
                     className="border rounded-lg px-3 py-2 text-sm w-28 text-right font-black focus:ring-2 focus:ring-blue-600 outline-none shadow-sm transition-all"
                   />
