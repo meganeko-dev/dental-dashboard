@@ -1,10 +1,20 @@
+// 'use client'
+// import { createBrowserClient } from '@supabase/ssr'
+// import { useState, useEffect } from 'react'
+// import { KpiCard } from '@/components/dashboard/KpiCard'
+// import { KpiEngine } from '@/lib/kpi-engine'
+// import Link from 'next/link'
+// import { useRouter } from 'next/navigation'
+// import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+// import { useAuth } from '@/context/AuthContext'
+
 // const DASHBOARD_TABS = [
 //   {
 //     id: 'profitability',
 //     label: '収益性',
 //     items: [
 //       { id: 'total_amount', label: '売上', unit: '円' },
-//       { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, // 💡 ここに追加
+//       { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, 
 //       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
 //       { id: 'recept_count', label: 'レセプト数', unit: '件' },
 //       { id: 'avg_price', label: '平均単価', unit: '円' },
@@ -35,11 +45,9 @@
 //     items: [
 //       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
 //       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
-//       // { id: 'util_rate', label: '稼働率', unit: '%' },
 //       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
 //       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
 //       { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
-     
 //     ]
 //   }
 // ]
@@ -60,7 +68,8 @@
 //   const [selectedMonth, setSelectedMonth] = useState(6)
 //   const [activeTab, setActiveTab] = useState('profitability')
   
-//   // 取得データを配列として保持するための初期化
+//   const [goals, setGoals] = useState<Record<string, number>>({}) // 💡 目標値の保存用
+//   const [maintenanceKeys, setMaintenanceKeys] = useState<string[]>([]) // 💡 メンテナンス設定の保存用
 //   const [targetData, setTargetData] = useState<any[]>([])
 //   const [compData, setCompData] = useState<any[]>([])
 //   const [prevData, setPrevData] = useState<any[]>([])
@@ -73,11 +82,10 @@
 //     window.location.href = '/login'
 //   }
 
-//   // 元の正しい50音順ソート処理とラベル設定を完全復元
 //   useEffect(() => {
 //     if (authLoading || !corpId) return
 
-//     const fetchData = async () => {
+//     const init = async () => {
 //       const { data } = await supabase
 //         .from('unique_staff_options')
 //         .select('staff_name, clinic_name')
@@ -103,9 +111,33 @@
 //           setCompareStaff(options[1]?.value || options[0].value);
 //         }
 //       }
+
+//       // 💡 目標値（data_mappings）を取得
+//       const { data: goalData } = await supabase
+//         .from('data_mappings')
+//         .select('key, value')
+//         .eq('mapping_type', 'kpi_goal')
+//         .eq('corporation_id', corpId)
+      
+//       const formattedGoals: Record<string, number> = {}
+//       goalData?.forEach(d => {
+//         formattedGoals[d.key] = Number(d.value)
+//       })
+//       setGoals(formattedGoals)
+
+//       // 💡 メンテナンス項目定義（data_mappings）を取得
+//       const { data: maintData } = await supabase
+//         .from('data_mappings')
+//         .select('key')
+//         .eq('mapping_type', 'is_maintenance')
+//         .eq('value', 'true')
+//         .eq('corporation_id', corpId)
+      
+//       setMaintenanceKeys(maintData?.map(d => d.key) || [])
+
 //       setLoading(false)
 //     };
-//     fetchData();
+//     init();
 //   }, [corpId, authLoading, supabase, mode]);
 
 //   useEffect(() => {
@@ -113,7 +145,6 @@
 //     setLoading(true);
     
 //     const fetchData = async () => {
-//       // 取得先を flexible_kpis に変更。staff_nameに不正な文字が混ざらないため正しく取得されます
 //       const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
 //         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('year', selectedYear).eq('month', selectedMonth),
 //         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('year', selectedYear).eq('month', selectedMonth),
@@ -130,14 +161,17 @@
 //     fetchData();
 //   }, [targetStaff, compareStaff, selectedYear, selectedMonth, corpId, supabase]);
 
-//   // KpiEngineを使用してグラフデータを計算
 //   const chartData = Array.from({ length: 12 }, (_, i) => {
 //     const m = i + 1;
 //     const monthlyData = historyData.filter(h => h.month === m);
 //     return {
 //       name: `${m}月`,
-//       売上: KpiEngine.calc(monthlyData, 'total_amount'),
-//       来院人数: KpiEngine.calc(monthlyData, 'patients_count')
+//       売上: KpiEngine.calc(monthlyData, 'total_amount', maintenanceKeys),
+//       来院人数: KpiEngine.calc(monthlyData, 'patients_count', maintenanceKeys),
+//       次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate', maintenanceKeys),
+//       キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate', maintenanceKeys),
+//       メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate', maintenanceKeys),
+//       離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate', maintenanceKeys)
 //     };
 //   });
 
@@ -194,8 +228,27 @@
 //                 <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
 //                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
 //                 <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
-//                 <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
-//                 <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+                
+//                 <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
+
+//                 {activeTab === 'profitability' && (
+//                   <>
+//                     <Bar yAxisId="right" dataKey="来院人数" fill="#4185f4" radius={[4, 4, 0, 0]} barSize={40} />
+//                     <Line yAxisId="left" type="linear" dataKey="売上" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+//                   </>
+//                 )}
+//                 {activeTab === 'booking' && (
+//                   <>
+//                     <Line yAxisId="left" type="linear" dataKey="次回予約取得率" stroke="#4185f4" strokeWidth={3} dot={{r: 4, fill: '#4185f4'}} />
+//                     <Line yAxisId="right" type="linear" dataKey="キャンセル率" stroke="#ea4335" strokeWidth={3} dot={{r: 4, fill: '#ea4335'}} />
+//                   </>
+//                 )}
+//                 {activeTab === 'utilization' && (
+//                   <>
+//                     <Line yAxisId="left" type="linear" dataKey="メンテナンス率" stroke="#34a853" strokeWidth={3} dot={{r: 4, fill: '#34a853'}} />
+//                     <Line yAxisId="right" type="linear" dataKey="離脱率" stroke="#fbbc04" strokeWidth={3} dot={{r: 4, fill: '#fbbc04'}} />
+//                   </>
+//                 )}
 //               </ComposedChart>
 //             </ResponsiveContainer>
 //           </div>
@@ -209,14 +262,16 @@
 
 //         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 //           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-//             const val = KpiEngine.calc(targetData, kpi.id)
-//             const compVal = KpiEngine.calc(compData, kpi.id)
-//             const prevVal = KpiEngine.calc(prevData, kpi.id)
+//             const val = KpiEngine.calc(targetData, kpi.id, maintenanceKeys)
+//             const compVal = KpiEngine.calc(compData, kpi.id, maintenanceKeys)
+//             const prevVal = KpiEngine.calc(prevData, kpi.id, maintenanceKeys)
             
 //             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
 //             const mom = KpiEngine.calcRatio(val, prevVal)
             
-//             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
+//             const goal = goals[kpi.label] || 0
+//             const achievement = isCountKpi ? mom : KpiEngine.calcRatio(val, goal)
+//             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth, maintenanceKeys);
 
 //             return (
 //               <KpiCard
@@ -226,11 +281,11 @@
 //                 unit={kpi.unit}
 //                 forecast={forecast}
 //                 compVal={compVal}
-//                 achievement={mom}
+//                 achievement={achievement}
 //                 compareClinic={staffOptions.find(s => s.value === compareStaff)?.label || ''} 
 //                 isCountKpi={isCountKpi}
 //                 prevVal={prevVal}
-//                 goalVal={0}
+//                 goalVal={goal}
 //                 mom={mom}
 //                 mode={mode}
 //               />
@@ -242,7 +297,6 @@
 //   )
 // }
 
-// // 元の正しいUIとvalue構造を完全復元
 // function SelectBox({ label, value, onChange, options, highlight }: any) {
 //     return (
 //       <div className="flex flex-col gap-1">
@@ -278,7 +332,7 @@ const DASHBOARD_TABS = [
     label: '収益性',
     items: [
       { id: 'total_amount', label: '売上', unit: '円' },
-      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, // 💡 ここに追加
+      { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' }, 
       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
@@ -309,11 +363,9 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
-      // { id: 'util_rate', label: '稼働率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
       { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
-     
     ]
   }
 ]
@@ -334,6 +386,8 @@ export default function StaffDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
   
+  const [goals, setGoals] = useState<Record<string, number>>({})
+  const [maintenanceKeys, setMaintenanceKeys] = useState<string[]>([])
   const [targetData, setTargetData] = useState<any[]>([])
   const [compData, setCompData] = useState<any[]>([])
   const [prevData, setPrevData] = useState<any[]>([])
@@ -349,7 +403,7 @@ export default function StaffDashboard() {
   useEffect(() => {
     if (authLoading || !corpId) return
 
-    const fetchData = async () => {
+    const init = async () => {
       const { data } = await supabase
         .from('unique_staff_options')
         .select('staff_name, clinic_name')
@@ -375,9 +429,31 @@ export default function StaffDashboard() {
           setCompareStaff(options[1]?.value || options[0].value);
         }
       }
+
+      const { data: goalData } = await supabase
+        .from('data_mappings')
+        .select('key, value')
+        .eq('mapping_type', 'kpi_goal')
+        .eq('corporation_id', corpId)
+      
+      const formattedGoals: Record<string, number> = {}
+      goalData?.forEach(d => {
+        formattedGoals[d.key] = Number(d.value)
+      })
+      setGoals(formattedGoals)
+
+      const { data: maintData } = await supabase
+        .from('data_mappings')
+        .select('key')
+        .eq('mapping_type', 'is_maintenance')
+        .eq('value', 'true')
+        .eq('corporation_id', corpId)
+      
+      setMaintenanceKeys(maintData?.map(d => d.key) || [])
+
       setLoading(false)
     };
-    fetchData();
+    init();
   }, [corpId, authLoading, supabase, mode]);
 
   useEffect(() => {
@@ -406,12 +482,12 @@ export default function StaffDashboard() {
     const monthlyData = historyData.filter(h => h.month === m);
     return {
       name: `${m}月`,
-      売上: KpiEngine.calc(monthlyData, 'total_amount'),
-      来院人数: KpiEngine.calc(monthlyData, 'patients_count'),
-      次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate'),
-      キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate'),
-      メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate'),
-      離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate')
+      売上: KpiEngine.calc(monthlyData, 'total_amount', maintenanceKeys),
+      来院人数: KpiEngine.calc(monthlyData, 'patients_count', maintenanceKeys),
+      次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate', maintenanceKeys),
+      キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate', maintenanceKeys),
+      メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate', maintenanceKeys),
+      離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate', maintenanceKeys)
     };
   });
 
@@ -436,9 +512,10 @@ export default function StaffDashboard() {
               </h1>
               <p className="text-xs font-bold text-slate-400 tracking-widest uppercase italic">Performance Report</p>
             </div>
+            {/* 💡 リンクの修正：prefetchを無効化し、パスを再明示 */}
             <div className="flex flex-col gap-2">
-              <Link href="/" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Clinic View 🏥</Link>
-              <Link href="/admin" className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</Link>
+              <Link href="/" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Clinic View 🏥</Link>
+              <Link href="/admin" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</Link>
             </div>
           </div>
           
@@ -469,7 +546,6 @@ export default function StaffDashboard() {
                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
                 <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
                 
-                {/* 💡 凡例を追加 */}
                 <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 
                 {activeTab === 'profitability' && (
@@ -503,14 +579,16 @@ export default function StaffDashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-            const val = KpiEngine.calc(targetData, kpi.id)
-            const compVal = KpiEngine.calc(compData, kpi.id)
-            const prevVal = KpiEngine.calc(prevData, kpi.id)
+            const val = KpiEngine.calc(targetData, kpi.id, maintenanceKeys)
+            const compVal = KpiEngine.calc(compData, kpi.id, maintenanceKeys)
+            const prevVal = KpiEngine.calc(prevData, kpi.id, maintenanceKeys)
             
             const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
             const mom = KpiEngine.calcRatio(val, prevVal)
             
-            const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth);
+            const goal = goals[kpi.label] || 0
+            const achievement = isCountKpi ? mom : KpiEngine.calcRatio(val, goal)
+            const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth, maintenanceKeys);
 
             return (
               <KpiCard
@@ -520,11 +598,11 @@ export default function StaffDashboard() {
                 unit={kpi.unit}
                 forecast={forecast}
                 compVal={compVal}
-                achievement={mom}
+                achievement={achievement}
                 compareClinic={staffOptions.find(s => s.value === compareStaff)?.label || ''} 
                 isCountKpi={isCountKpi}
                 prevVal={prevVal}
-                goalVal={0}
+                goalVal={goal}
                 mom={mom}
                 mode={mode}
               />

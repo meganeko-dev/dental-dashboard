@@ -9,6 +9,8 @@ import { DataUpload } from '@/components/admin/DataUpload'
 import { GoalSetter } from '@/components/admin/GoalSetter'
 import { DataEditor } from '@/components/admin/DataEditor'
 import { MappingManager } from '@/components/admin/MappingManager'
+import { MaintenanceSetter } from '@/components/admin/MaintenanceSetter'
+import { InsuranceRevenueSetter } from '@/components/admin/InsuranceRevenueSetter'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -20,7 +22,7 @@ export default function AdminPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping'>('upload')
+  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'maintenance' | 'insurance'>('upload')
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -42,13 +44,17 @@ export default function AdminPage() {
         <nav className="space-y-2 flex-1">
           <MenuButton active={activeMenu === 'upload'} onClick={() => setActiveMenu('upload')} icon="📤" label="データアップロード" />
           <MenuButton active={activeMenu === 'goals'} onClick={() => setActiveMenu('goals')} icon="🎯" label="目標入力" />
+          <MenuButton active={activeMenu === 'insurance'} onClick={() => setActiveMenu('insurance')} icon="💰" label="保険売上入力" />
+          <MenuButton active={activeMenu === 'maintenance'} onClick={() => setActiveMenu('maintenance')} icon="🧼" label="メンテナンス設定" />
           <MenuButton active={activeMenu === 'edit'} onClick={() => setActiveMenu('edit')} icon="📝" label="データ修正" />
           {/* 条件付きレンダリング: 特定法人以外にはボタン自体を表示しない */}
           {showMapping && (
             <MenuButton active={activeMenu === 'mapping'} onClick={() => setActiveMenu('mapping')} icon="🔗" label="マッピング" />
           )}
         </nav>
-        <div className="pt-6 border-t border-slate-800"><Link href="/" className="text-xs font-bold text-slate-500 hover:text-white transition-colors">← Dashboard</Link></div>
+        <div className="pt-6 border-t border-slate-800">
+          <Link href="/" prefetch={false} className="text-xs font-bold text-slate-500 hover:text-white transition-colors">← Dashboard</Link>
+        </div>
       </aside>
 
       <main className="flex-1 p-10 overflow-y-auto">
@@ -56,7 +62,7 @@ export default function AdminPage() {
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{activeMenu} Mode</h2>
             <div className="flex gap-3 items-center">
-              <Link href="/" className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg">📊 画面を確認</Link>
+              <Link href="/" prefetch={false} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg">📊 画面を確認</Link>
               <button 
                 onClick={handleLogout}
                 className="bg-white border border-slate-200 text-slate-600 px-5 py-2.5 rounded-xl text-xs font-black hover:bg-red-50 hover:text-red-600 transition-all shadow-md cursor-pointer"
@@ -69,6 +75,8 @@ export default function AdminPage() {
           {/* corpId と mode を各コンポーネントに渡す */}
           {activeMenu === 'upload' && <DataUpload corpId={corpId} />}
           {activeMenu === 'goals' && <GoalSetter corpId={corpId} />}
+          {activeMenu === 'insurance' && <InsuranceRevenueSetter corpId={corpId} mode={mode} />}
+          {activeMenu === 'maintenance' && <MaintenanceSetter corpId={corpId} />}
           {activeMenu === 'edit' && <DataEditor corpId={corpId} mode={mode} />}
           
           {/* コンテンツ側でもガードをかける */}
