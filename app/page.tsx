@@ -1,7 +1,8 @@
 'use client'
+
 import { createBrowserClient } from '@supabase/ssr'
-import { useState, useEffect } from 'react'
-import { KpiCard } from '@/components/dashboard/KpiCard'
+import { useState, useEffect, useMemo } from 'react'
+import KpiCard from '@/components/dashboard/KpiCard'
 import { KpiEngine } from '@/lib/kpi-engine'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -15,6 +16,10 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'total_amount', label: '売上', unit: '円' },
       { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' },
+      { id: 'insurance_amount', label: '保険売上', unit: '円' },
+      { id: 'avg_insurance_price_per_day', label: '保険1日平均単価', unit: '円' },
+      { id: 'self_amount', label: '自費売上', unit: '円' },
+      { id: 'avg_self_price_per_day', label: '自費1日平均単価', unit: '円' },
       { id: 'recept_price', label: 'レセプト単価', unit: '円' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
@@ -25,10 +30,10 @@ const DASHBOARD_TABS = [
     id: 'booking',
     label: '予約精度',
     items: [
-      { id: 'reserved_count', label: '当月の予約数', unit: '名' },
+      { id: 'reserved_count', label: '予約数', unit: '名' },
       { id: 'visit_rate', label: '来院率', unit: '%' },
-      { id: 'next_reserve_count', label: '次回予約取得数', unit: '件' },
-      { id: 'next_reserve_rate', label: '次回予約取得率', unit: '%' },
+      { id: 'today_reserve_count', label: '当日予約取得数', unit: '件' },
+      { id: 'today_reserve_rate', label: '当日予約取得率', unit: '%' },
       { id: 'cancel_count', label: 'キャンセル数', unit: '件' },
       { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
       { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
@@ -52,16 +57,33 @@ const DASHBOARD_TABS = [
   }
 ]
 
+function SelectBox({ label, value, onChange, options, highlight }: any) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
+      <select 
+        value={value} 
+        onChange={e => onChange(e.target.value)} 
+        className={`border-none rounded-2xl px-4 py-2.5 h-[42px] text-xs font-black outline-none cursor-pointer shadow-sm transition-all min-w-[200px] ${highlight ? 'bg-sky-100 text-black' : 'bg-slate-100 text-slate-700'}`}
+      >
+        {options.map((name: string) => (
+          <option key={name} value={name} className="text-slate-800">{name}</option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const router = useRouter()
   const { corpId, mode, loading: authLoading } = useAuth()
   
-  const supabase = createBrowserClient(
+  const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  ), [])
 
-  const [corpName, setCorpName] = useState('') // 💡 法人名を保持するStateを追加
+  const [corpName, setCorpName] = useState('')
   const [clinics, setClinics] = useState<string[]>([])
   const [targetClinic, setTargetClinic] = useState('')
   const [compareClinic, setCompareClinic] = useState('')
@@ -74,6 +96,7 @@ export default function Dashboard() {
   const [targetData, setTargetData] = useState<any[]>([])
   const [compData, setCompData] = useState<any[]>([])
   const [prevData, setPrevData] = useState<any[]>([])
+  const [lastYearData, setLastYearData] = useState<any[]>([])
   const [historyData, setHistoryData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -87,7 +110,6 @@ export default function Dashboard() {
     if (authLoading || !corpId) return
 
     const init = async () => {
-      // 💡 法人名を取得する処理を追加
       const { data: corpData } = await supabase
         .from('corporations')
         .select('name')
@@ -96,12 +118,12 @@ export default function Dashboard() {
       
       if (corpData) setCorpName(corpData.name);
 
-      const { data } = await supabase
+      const { data: clinicRes } = await supabase
         .from('unique_clinic_options')
         .select('clinic_name')
         .eq('corporation_id', corpId)
       
-      const names = Array.from(new Set(data?.map(d => d.clinic_name))).sort()
+      const names = Array.from(new Set(clinicRes?.map(d => d.clinic_name))).sort()
       setClinics(names)
       
       if (names.length > 0) {
@@ -140,35 +162,42 @@ export default function Dashboard() {
     setLoading(true)
 
     const fetchData = async () => {
-      const [targetRes, compRes, prevRes, historyRes] = await Promise.all([
+      const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+      const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+
+      const [targetRes, compRes, prevRes, lastYearRes, historyRes] = await Promise.all([
         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth - 1),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', prevYear).eq('month', prevMonth),
+        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear - 1).eq('month', selectedMonth),
         supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).order('month', { ascending: true })
       ])
       
       setTargetData(targetRes.data || [])
       setCompData(compRes.data || [])
       setPrevData(prevRes.data || [])
+      setLastYearData(lastYearRes.data || [])
       setHistoryData(historyRes.data || [])
       setLoading(false)
     }
     fetchData()
   }, [targetClinic, compareClinic, selectedYear, selectedMonth, corpId, authLoading, supabase])
 
-  const chartData = Array.from({ length: 12 }, (_, i) => {
-    const m = i + 1;
-    const monthlyData = historyData.filter(h => h.month === m);
-    return {
-      name: `${m}月`,
-      売上: KpiEngine.calc(monthlyData, 'total_amount', maintenanceKeys),
-      来院人数: KpiEngine.calc(monthlyData, 'patients_count', maintenanceKeys),
-      次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate', maintenanceKeys),
-      キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate', maintenanceKeys),
-      メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate', maintenanceKeys),
-      離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate', maintenanceKeys)
-    };
-  });
+  const chartData = useMemo(() => {
+    return Array.from({ length: 12 }, (_, i) => {
+      const m = i + 1;
+      const monthlyData = historyData.filter(h => h.month === m);
+      return {
+        name: `${m}月`,
+        売上: KpiEngine.calc(monthlyData, 'total_amount', maintenanceKeys),
+        来院人数: KpiEngine.calc(monthlyData, 'patients_count', maintenanceKeys),
+        次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate', maintenanceKeys),
+        キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate', maintenanceKeys),
+        メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate', maintenanceKeys),
+        離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate', maintenanceKeys)
+      };
+    });
+  }, [historyData, maintenanceKeys]);
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -189,8 +218,7 @@ export default function Dashboard() {
               <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase italic">
                 {mode === 'single' ? 'Clinic Analytics' : 'Group KPI Dashboard'}
               </h1>
-              {/* 💡 表示を corpId から取得した corpName に変更 */}
-              <p className="text-xs font-bold text-slate-400 tracking-widest uppercase italic tracking-widest">
+              <p className="text-xs font-bold text-slate-400 tracking-widest uppercase italic">
                 {corpName || `Corp ID: ${corpId}`}
               </p>
             </div>
@@ -200,7 +228,6 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex flex-wrap gap-4 items-end">
-            {/* 期間選択、セレクトボックス部分は変更なし */}
             <div className="flex flex-col gap-1">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
@@ -221,7 +248,7 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* 以降のチャート、タブ、カード表示部分は変更なし */}
+        {/* チャート */}
         <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-80">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData}>
@@ -230,7 +257,6 @@ export default function Dashboard() {
               <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
               <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
-              
               <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 
               {activeTab === 'profitability' && (
@@ -255,58 +281,52 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
+        {/* タブ */}
         <div className="flex gap-2 p-1 bg-slate-200/50 rounded-2xl w-fit">
           {DASHBOARD_TABS.map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-6 py-2 rounded-xl text-xs font-black transition-all ${activeTab === tab.id ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>{tab.label}</button>
           ))}
         </div>
 
+        {/* KPIカード一覧 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
             const val = KpiEngine.calc(targetData, kpi.id, maintenanceKeys)
-            const compVal = KpiEngine.calc(compData, kpi.id, maintenanceKeys)
             const prevVal = KpiEngine.calc(prevData, kpi.id, maintenanceKeys)
-            
-            const isCountKpi = kpi.id.includes('count') || kpi.id === 'total_amount'
-            const mom = KpiEngine.calcRatio(val, prevVal)
-
+            const lastYearVal = KpiEngine.calc(lastYearData, kpi.id, maintenanceKeys)
+            const compClinicVal = KpiEngine.calc(compData, kpi.id, maintenanceKeys)
             const goal = goals[kpi.label] || 0
-            const achievement = isCountKpi ? mom : KpiEngine.calcRatio(val, goal)
+            
+            const finalCompVal = mode === 'single' ? lastYearVal : compClinicVal
+            const finalCompLabel = mode === 'single' ? '前年同月' : compareClinic
+
+            const mom = KpiEngine.calcRatio(val, prevVal)
+            const achievement = KpiEngine.calcRatio(val, goal)
 
             const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth, maintenanceKeys);
 
             return (
               <KpiCard
                 key={kpi.id}
+                kpiId={kpi.id}
                 label={kpi.label}
                 value={val}
                 unit={kpi.unit}
                 forecast={forecast}
-                compVal={compVal}
+                compVal={finalCompVal}
                 achievement={achievement}
-                compareClinic={compareClinic}
-                isCountKpi={isCountKpi}
+                compareClinic={finalCompLabel}
+                isCountKpi={true}
                 prevVal={prevVal}
                 goalVal={goal}
                 mom={mom}
                 mode={mode}
-                hideCompare={mode === 'single'}
+                hideCompare={false}
               />
             )
           })}
         </div>
       </div>
-    </div>
-  )
-}
-
-function SelectBox({ label, value, onChange, options, highlight }: any) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</label>
-      <select value={value} onChange={e => onChange(e.target.value)} className={`border-none rounded-2xl px-4 py-2.5 h-[42px] text-xs font-black outline-none cursor-pointer shadow-sm transition-all min-w-[200px] ${highlight ? 'bg-sky-100 text-black' : 'bg-slate-100 text-slate-700'}`}>
-        {options.map((name: string) => <option key={name} value={name} className="text-slate-800">{name}</option>)}
-      </select>
     </div>
   )
 }

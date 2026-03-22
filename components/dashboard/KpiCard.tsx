@@ -1,8 +1,151 @@
+// 'use client'
+// import React from 'react';
+// import { KpiEngine } from '@/lib/kpi-engine';
+
+// interface KpiCardProps {
+//   kpiId?: string;
+//   label: string;
+//   value: number;
+//   unit: string;
+//   forecast: number | null;
+//   compVal: number;
+//   achievement: number;
+//   compareClinic: string;
+//   isCountKpi: boolean;
+//   prevVal: number;
+//   goalVal: number;
+//   mom: number;
+//   mode?: 'single' | 'multi' | null;
+//   hideCompare?: boolean;
+// }
+
+// const KpiCard: React.FC<KpiCardProps> = ({
+//   kpiId, label, value, unit, forecast, compVal, achievement, 
+//   compareClinic, isCountKpi, prevVal, goalVal, mom, mode, hideCompare
+// }) => {
+//   const vsCompRatio = KpiEngine.calcRatio(value || 0, compVal || 0);
+//   const showCompare = !hideCompare; 
+
+//   // 💡 売上、1日平均単価、およびその内訳（保険・自費）の場合は、左下に「目標達成率」を表示
+//   const targetBasedKpis = [
+//     'total_amount', 
+//     'avg_price_per_day', 
+//     'insurance_amount', 
+//     'avg_insurance_price_per_day', 
+//     'self_amount', 
+//     'avg_self_price_per_day'
+//   ];
+//   const showTargetOnLeft = kpiId ? targetBasedKpis.includes(kpiId) : false;
+  
+//   const leftBottomLabel = showTargetOnLeft ? "目標達成率" : "着地予測";
+//   const leftBottomRatio = showTargetOnLeft 
+//     ? KpiEngine.calcRatio(value, goalVal) 
+//     : (forecast && goalVal > 0 ? (forecast / goalVal) * 100 : 0);
+//   const leftBottomValue = showTargetOnLeft ? goalVal : forecast;
+
+//   const formatValue = (num: number | null | undefined) => {
+//     if (num == null) return '0';
+//     return num.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
+//   };
+
+//   return (
+//     <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex overflow-hidden hover:shadow-md transition-shadow">
+//       {/* 左側：当月実績と着地予測/目標 */}
+//       <div className="w-[60%] p-6 flex flex-col justify-between border-r border-slate-100">
+//         <div>
+//           <div className="flex items-center gap-2 mb-2">
+//             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{label}</span>
+//             {mom != null && mom !== 0 && (
+//               <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${mom >= 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+//                 {mom >= 100 ? '↑' : '↓'} {formatValue(Math.abs(mom - 100))}%
+//               </span>
+//             )}
+//           </div>
+//           <div className="flex items-baseline gap-1">
+//             <span className="text-3xl font-black tracking-tighter text-slate-900 italic">
+//               {unit === '円' ? formatValue(value / 10000) : formatValue(value)}
+//             </span>
+//             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unit === '円' ? '万円' : unit}</span>
+//           </div>
+//         </div>
+
+//         <div className="pt-4 border-t border-slate-50 mt-4">
+//           <div className="flex justify-between items-end mb-1">
+//             <div className="flex flex-col">
+//                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{leftBottomLabel}</span>
+//                 {leftBottomRatio > 0 && (
+//                   <span className="text-[10px] font-black text-indigo-500 leading-none mt-0.5">
+//                     {formatValue(leftBottomRatio)}%
+//                   </span>
+//                 )}
+//             </div>
+//             <span className="text-sm font-black text-slate-700 italic">
+//               {leftBottomValue !== null ? (unit === '円' ? formatValue(leftBottomValue / 10000) + '万' : formatValue(leftBottomValue)) : '-'}
+//             </span>
+//           </div>
+//           <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+//             <div 
+//               className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+//               style={{ width: `${Math.min(leftBottomRatio, 100)}%` }}
+//             />
+//           </div>
+//         </div>
+//       </div>
+
+//       {/* 右側：比較セクション */}
+//       <div className="w-[40%] p-6 bg-slate-50/50 flex flex-col justify-between space-y-6">
+//         {showCompare ? (
+//           <div>
+//             <div className="flex justify-between items-end mb-1.5">
+//               <span className="text-[10px] font-bold text-slate-500 uppercase leading-tight">
+//                 vs {compareClinic || '比較対象'}
+//               </span>
+//               <span className={`text-[11px] font-black ${vsCompRatio >= 100 ? 'text-blue-600' : 'text-slate-500'}`}>
+//                 {formatValue(vsCompRatio)}%
+//               </span>
+//             </div>
+//             <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mb-1.5">
+//               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(vsCompRatio || 0, 100)}%` }} />
+//             </div>
+//             <span className="text-xs font-bold text-slate-700">
+//               {unit === '円' ? formatValue(compVal / 10000) + '万' : formatValue(compVal)}
+//             </span>
+//           </div>
+//         ) : (
+//           <div className="min-h-[48px] w-full border-b border-dashed border-slate-200/50 pb-2 flex items-end opacity-0"></div>
+//         )}
+
+//         {/* 右下：前月比 */}
+//         <div>
+//           <div className="flex justify-between items-end mb-1.5">
+//             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">前月比</span>
+//             <span className={`text-[11px] font-black ${ mom >= 100 ? 'text-emerald-600' : 'text-orange-600'}`}>
+//               {formatValue(mom)}%
+//             </span>
+//           </div>
+//           <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mb-1.5">
+//             <div 
+//               className={`h-full rounded-full ${ mom >= 100 ? 'bg-emerald-500' : 'bg-orange-500'}`}
+//               style={{ width: `${Math.min(mom || 0, 100)}%` }}
+//             />
+//           </div>
+//           <span className="text-xs font-bold text-slate-700">
+//             {unit === '円' ? formatValue(prevVal / 10000) + '万' : formatValue(prevVal)}
+//           </span>
+//         </div>
+//       </div>
+//     </div>
+//   );
+// };
+
+// export default KpiCard;
+
 'use client'
 import React from 'react';
 import { KpiEngine } from '@/lib/kpi-engine';
 
 interface KpiCardProps {
+  kpiId?: string;
   label: string;
   value: number;
   unit: string;
@@ -18,17 +161,33 @@ interface KpiCardProps {
   hideCompare?: boolean;
 }
 
-export const KpiCard: React.FC<KpiCardProps> = ({
-  label, value, unit, forecast, compVal, achievement, 
+const KpiCard: React.FC<KpiCardProps> = ({
+  kpiId, label, value, unit, forecast, compVal, achievement, 
   compareClinic, isCountKpi, prevVal, goalVal, mom, mode, hideCompare
 }) => {
   const vsCompRatio = KpiEngine.calcRatio(value || 0, compVal || 0);
+  const showCompare = !hideCompare; 
 
-  const showCompare = !hideCompare && (mode === 'multi' || mode === 'single');
+  // 💡 売上、1日平均単価、およびその内訳（保険・自費）の場合は、左下に「目標達成率」を表示
+  const targetBasedKpis = [
+    'total_amount', 
+    'avg_price_per_day', 
+    'insurance_amount', 
+    'avg_insurance_price_per_day', 
+    'self_amount', 
+    'avg_self_price_per_day'
+  ];
+  const showTargetOnLeft = kpiId ? targetBasedKpis.includes(kpiId) : false;
+  
+  const leftBottomLabel = showTargetOnLeft ? "目標達成率" : "着地予測";
+  
+  // 💡 修正箇所: 着地予測の場合は forecast に対する value の割合を計算するように修正
+  const leftBottomRatio = showTargetOnLeft 
+    ? KpiEngine.calcRatio(value, goalVal) 
+    : (forecast && forecast > 0 ? (value / forecast) * 100 : 0);
+    
+  const leftBottomValue = showTargetOnLeft ? goalVal : forecast;
 
-  const forecastRatio = (forecast && forecast > 0) ? (value / forecast) * 100 : 0;
-
-  // 💡 追加: すべての数値を「最大で小数点第二位まで＋カンマ区切り」にする共通関数
   const formatValue = (num: number | null | undefined) => {
     if (num == null) return '0';
     return num.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
@@ -36,7 +195,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex overflow-hidden hover:shadow-md transition-shadow">
-      {/* 左側：当月実績と着地予測 */}
+      {/* 左側：当月実績と着地予測/目標 */}
       <div className="w-[60%] p-6 flex flex-col justify-between border-r border-slate-100">
         <div>
           <div className="flex items-center gap-2 mb-2">
@@ -49,7 +208,6 @@ export const KpiCard: React.FC<KpiCardProps> = ({
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-3xl font-black tracking-tighter text-slate-900 italic">
-              {/* 売上の場合は1万で割り、それ以外はそのまま共通関数を通す */}
               {unit === '円' ? formatValue(value / 10000) : formatValue(value)}
             </span>
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unit === '円' ? '万円' : unit}</span>
@@ -59,21 +217,21 @@ export const KpiCard: React.FC<KpiCardProps> = ({
         <div className="pt-4 border-t border-slate-50 mt-4">
           <div className="flex justify-between items-end mb-1">
             <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">着地予測</span>
-                {forecast !== null && forecast > 0 && (
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{leftBottomLabel}</span>
+                {leftBottomRatio > 0 && (
                   <span className="text-[10px] font-black text-indigo-500 leading-none mt-0.5">
-                    {formatValue(forecastRatio)}%
+                    {formatValue(leftBottomRatio)}%
                   </span>
                 )}
             </div>
             <span className="text-sm font-black text-slate-700 italic">
-              {forecast !== null ? (unit === '円' ? formatValue(forecast / 10000) + 'M' : formatValue(forecast)) : '-'}
+              {leftBottomValue !== null ? (unit === '円' ? formatValue(leftBottomValue / 10000) + '万' : formatValue(leftBottomValue)) : '-'}
             </span>
           </div>
           <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
             <div 
               className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
-              style={{ width: (forecast && forecast > 0) ? `${Math.min(forecastRatio, 100)}%` : '0%' }}
+              style={{ width: `${Math.min(leftBottomRatio, 100)}%` }}
             />
           </div>
         </div>
@@ -95,35 +253,34 @@ export const KpiCard: React.FC<KpiCardProps> = ({
               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(vsCompRatio || 0, 100)}%` }} />
             </div>
             <span className="text-xs font-bold text-slate-700">
-              {formatValue(compVal)}
+              {unit === '円' ? formatValue(compVal / 10000) + '万' : formatValue(compVal)}
             </span>
           </div>
         ) : (
-          <div className="min-h-[48px] w-full border-b border-dashed border-slate-200/50 pb-2 flex items-end opacity-0">
-             <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">
-                Future Metric Reserved Space
-             </span>
-          </div>
+          <div className="min-h-[48px] w-full border-b border-dashed border-slate-200/50 pb-2 flex items-end opacity-0"></div>
         )}
 
+        {/* 右下：前月比 */}
         <div>
           <div className="flex justify-between items-end mb-1.5">
-            <span className="text-[10px] font-bold text-slate-500 uppercase">{isCountKpi ? '前月比' : '目標達成率'}</span>
-            <span className={`text-[11px] font-black ${achievement >= 100 ? 'text-emerald-600' : 'text-orange-600'}`}>
-              {formatValue(achievement)}%
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">前月比</span>
+            <span className={`text-[11px] font-black ${ mom >= 100 ? 'text-emerald-600' : 'text-orange-600'}`}>
+              {formatValue(mom)}%
             </span>
           </div>
           <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden mb-1.5">
             <div 
-              className={`h-full rounded-full ${achievement >= 100 ? 'bg-emerald-500' : 'bg-orange-500'}`}
-              style={{ width: `${Math.min(achievement || 0, 100)}%` }}
+              className={`h-full rounded-full ${ mom >= 100 ? 'bg-emerald-500' : 'bg-orange-500'}`}
+              style={{ width: `${Math.min(mom || 0, 100)}%` }}
             />
           </div>
           <span className="text-xs font-bold text-slate-700">
-            {isCountKpi ? formatValue(prevVal) : formatValue(goalVal)}
+            {unit === '円' ? formatValue(prevVal / 10000) + '万' : formatValue(prevVal)}
           </span>
         </div>
       </div>
     </div>
   );
 };
+
+export default KpiCard;
