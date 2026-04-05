@@ -132,59 +132,102 @@ export const DataImporter = {
     })
   },
 
+  parseCSVAsArraySJIS: (file: File): Promise<string[][]> => {
+    return new Promise((resolve, reject) => {
+      Papa.parse(file, {
+        header: false,
+        skipEmptyLines: true,
+        encoding: 'Shift_JIS',
+        complete: (results) => resolve(results.data as string[][]),
+        error: (error) => reject(error),
+      })
+    })
+  },
+
   transformStats: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     const headers = data[0];
-    const results = [];
-    
+    const results: any[] = [];
+
+    // clinic,all 行から取得するKPIのホワイトリスト
+    // 「率」系は Stats 内で 0-1 形式のため ×100 して % に変換する
+    const CLINIC_KPI_MAP: Record<string, { kpi_name: string; multiply100: boolean }> = {
+      '診療日数':       { kpi_name: '診療日数',         multiply100: false },
+      '来院患者数':     { kpi_name: '来院患者数',        multiply100: false },
+      '継続患者':       { kpi_name: '来院人数_既存患者', multiply100: false },
+      '新患数':         { kpi_name: '来院人数_新規患者', multiply100: false },
+      '当日キャンセル数': { kpi_name: '当日キャンセル数',  multiply100: false },
+      '離脱患者':       { kpi_name: '離脱患者',          multiply100: false },
+      '離脱率':         { kpi_name: '離脱率',            multiply100: true  },
+      'ユニット稼働率': { kpi_name: 'チェア稼働率',       multiply100: true  },
+    };
+
+    // stage 行から取得するステージ名 → kpi_name マッピング
+    // 「初診」はkpi-engineの PATIENT_BREAKDOWN_KPIS に合わせ「初診/急患」とする
+    const STAGE_VISIT_MAP: Record<string, string> = {
+      '初診':     '来院人数_初診/急患',
+      '枠外':     '来院人数_枠外',
+      '治療1':    '来院人数_治療1',
+      '治療2':    '来院人数_治療2',
+      'imp':      '来院人数_imp',
+      'set':      '来院人数_set',
+      'DH':       '来院人数_DH',
+      'DH2':      '来院人数_DH2',
+      '矯正':     '来院人数_矯正',
+      'その他相談': '来院人数_その他相談',
+      // 'なし'・'訪問' は集計対象外
+    };
+
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      const cat1 = row[0];
-      const cat2 = row[1];
-      const item = row[2];
-      
-      if (!cat1) continue;
-      
-      let segment = null;
-      let t_type = null;
-      let s_role = null;
-      let s_name = "";
-      
-      if (cat1 === 'clinic') {
-        segment = 'clinic';
-      } else if (cat1.startsWith('基本診療') || cat1.startsWith('予約診療')) {
-        segment = 'person';
-        t_type = cat1.startsWith('基本診療') ? '基本診療' : '予約診療';
-        s_role = cat1.includes('）') ? cat1.split('）')[1] : null;
-        s_name = cat2 || "";
+      const cat1 = row[0]?.trim();
+      const cat2 = row[1]?.trim();
+      const item = row[2]?.trim();
+
+      if (!cat1 || !item) continue;
+
+      let kpi_name: string | null = null;
+      let multiply100 = false;
+
+      if (cat1 === 'clinic' && cat2 === 'all') {
+        const mapping = CLINIC_KPI_MAP[item];
+        if (!mapping) continue;
+        kpi_name = mapping.kpi_name;
+        multiply100 = mapping.multiply100;
+      } else if (cat1 === 'stage' && item === '来院患者数') {
+        const mapped = STAGE_VISIT_MAP[cat2 || ''];
+        if (!mapped) continue;
+        kpi_name = mapped;
       } else {
         continue;
       }
-      
+
       for (let j = 3; j < headers.length; j++) {
-        const yearMonth = headers[j];
+        const yearMonth = headers[j]?.trim();
         const valStr = row[j];
-        if (!valStr || valStr.trim() === '') continue;
-        
-        const value = parseFloat(valStr.replace(/,/g, ''));
+        if (!yearMonth || !valStr || valStr.trim() === '') continue;
+        if (!/^\d{6}$/.test(yearMonth)) continue;
+
+        let value = parseFloat(valStr.replace(/,/g, ''));
         if (isNaN(value)) continue;
-        
+        if (multiply100) value = parseFloat((value * 100).toFixed(4));
+
         const year = parseInt(yearMonth.substring(0, 4), 10);
         const month = parseInt(yearMonth.substring(4, 6), 10);
-        
+
         results.push({
           corporation_id: corpId,
           clinic_id: clinicId,
           clinic_name: clinicName,
-          staff_name: s_name,
-          year: year,
-          month: month,
+          staff_name: '',
+          year,
+          month,
           date: `${year}-${String(month).padStart(2, '0')}-01`,
-          segment: segment,
-          kpi_name: item,
-          value: value,
+          segment: 'clinic',
+          kpi_name,
+          value,
           is_target: false,
-          treatment_type: t_type,
-          staff_role: s_role,
+          treatment_type: '',
+          staff_role: '',
         });
       }
     }
@@ -193,49 +236,201 @@ export const DataImporter = {
 
   transformStatus: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     const headers = data[0];
-    const targetKpis = ['診療日数', '合計診療時間(H)'];
-    const targetIndices = targetKpis.map(kpi => headers.indexOf(kpi));
+    // 診療日数は医院状況では暦日数ベースになるケースがあるため Stats を正とし、ここでは除外
+    // 合計診療時間(H) のみ取得（Stats の合計診療時間は分単位のため、時間単位はこちらが唯一のソース）
+    const TARGET_KPI = '合計診療時間(H)';
     const ymIndex = headers.indexOf('年月');
-    
-    const results = [];
-    
+    const kpiIndex = headers.indexOf(TARGET_KPI);
+
+    if (ymIndex === -1 || kpiIndex === -1) return [];
+
+    const results: any[] = [];
+
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
-      const ymStr = row[ymIndex];
-      if (!ymStr) continue;
-      
+      const ymStr = row[ymIndex]?.trim();
+      if (!ymStr || !/^\d{6}$/.test(ymStr)) continue;
+
       const year = parseInt(ymStr.substring(0, 4), 10);
       const month = parseInt(ymStr.substring(4, 6), 10);
-      
-      targetIndices.forEach((colIndex, idx) => {
-        if (colIndex === -1) return;
-        const valStr = row[colIndex];
-        if (!valStr || valStr.trim() === '') return;
-        
-        const value = parseFloat(valStr.replace(/,/g, ''));
-        if (isNaN(value)) return;
-        
-        results.push({
-          corporation_id: corpId,
-          clinic_id: clinicId,
-          clinic_name: clinicName,
-          staff_name: "",
-          year: year,
-          month: month,
-          date: `${year}-${String(month).padStart(2, '0')}-01`,
-          segment: 'clinic',
-          kpi_name: targetKpis[idx],
-          value: value,
-          is_target: false,
-          treatment_type: null,
-          staff_role: null,
-        });
+
+      const valStr = row[kpiIndex];
+      if (!valStr || valStr.trim() === '') continue;
+
+      const value = parseFloat(valStr.replace(/,/g, ''));
+      if (isNaN(value)) continue;
+
+      results.push({
+        corporation_id: corpId,
+        clinic_id: clinicId,
+        clinic_name: clinicName,
+        staff_name: '',
+        year,
+        month,
+        date: `${year}-${String(month).padStart(2, '0')}-01`,
+        segment: 'clinic',
+        kpi_name: TARGET_KPI,
+        value,
+        is_target: false,
+        treatment_type: '',
+        staff_role: '',
       });
     }
     return results;
   },
 
-  // 💡 修正された transformStage
+  // FWLRNER6専用: 月計表（全Ｄｒ日別）= クリニック日別売上
+  transformSalesClinic: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
+    if (data.length < 2) return [];
+    const headers = data[0].map(h => h?.trim() ?? '');
+    const idx = (name: string) => headers.indexOf(name);
+
+    const dateIdx        = idx('対象日付');
+    const shahoCashIdx   = idx('社保現金入金額');
+    const shahoPaxIdx    = idx('社保患者数');
+    const shahoTenIdx    = idx('社保点数');
+    const kohoCashIdx    = idx('国保現金入金額');
+    const kohoPaxIdx     = idx('国保患者数');
+    const kohoTenIdx     = idx('国保点数');
+    const jifeeCashIdx   = idx('自費現金入金額');
+    const jifeeCardIdx   = idx('自費カード入金額');
+    const jifeePaxIdx    = idx('自費人数');
+    const zasshuCashIdx  = idx('雑収現金入金額');
+    const zasshuPaxIdx   = idx('雑収人数');
+    const kodoDaysIdx    = idx('稼働日数');
+
+    if (dateIdx === -1) return [];
+
+    const results: any[] = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const dateStr = row[dateIdx]?.trim();
+      if (!dateStr || !/^\d{4}\/\d{2}\/\d{2}$/.test(dateStr)) continue;
+
+      const n = (colIdx: number) => {
+        if (colIdx === -1) return 0;
+        const v = parseFloat(String(row[colIdx] ?? '').replace(/,/g, ''));
+        return isNaN(v) ? 0 : v;
+      };
+
+      const shahoCash  = n(shahoCashIdx);
+      const shahoPax   = n(shahoPaxIdx);
+      const shahoTen   = n(shahoTenIdx);
+      const kohoCash   = n(kohoCashIdx);
+      const kohoPax    = n(kohoPaxIdx);
+      const kohoTen    = n(kohoTenIdx);
+      const jifeeKingaku = n(jifeeCashIdx) + n(jifeeCardIdx);
+      const jifeePax   = n(jifeePaxIdx);
+      const zasshuCash = n(zasshuCashIdx);
+      const zasshuPax  = n(zasshuPaxIdx);
+
+      // 全値が0の行（休診日等）はスキップ
+      if ([shahoCash, shahoPax, kohoCash, kohoPax, jifeeKingaku, jifeePax, zasshuCash, zasshuPax].every(v => v === 0)) continue;
+
+      const date = dateStr.replace(/\//g, '-');
+      const [yearStr, monthStr] = dateStr.split('/');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
+
+      const common = {
+        corporation_id: corpId, clinic_id: clinicId, clinic_name: clinicName,
+        staff_name: '', year, month, date, is_target: false,
+        segment: 'clinic', staff_role: '', treatment_type: '',
+      };
+
+      [
+        { kpi_name: '社会保険_金額',     value: shahoCash },
+        { kpi_name: '社会保険_点数',     value: shahoTen },
+        { kpi_name: '国民健康保険_金額', value: kohoCash },
+        { kpi_name: '国民健康保険_点数', value: kohoTen },
+        { kpi_name: '自費治療_金額',     value: jifeeKingaku },
+        { kpi_name: '雑収入_金額',       value: zasshuCash },
+        { kpi_name: '社会保険_人数',     value: shahoPax },
+        { kpi_name: '国民健康保険_人数', value: kohoPax },
+        { kpi_name: '自費治療_人数',     value: jifeePax },
+        { kpi_name: '雑収入_人数',       value: zasshuPax },
+        { kpi_name: '稼働日数',          value: n(kodoDaysIdx) },
+      ].forEach(kpi => results.push({ ...common, ...kpi }));
+    }
+    return results;
+  },
+
+  // FWLRNER6専用: 月計表（総括）= 担当者別月次売上
+  transformSalesStaff: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
+    if (data.length < 2) return [];
+    const headers = data[0].map(h => h?.trim() ?? '');
+    const idx = (name: string) => headers.indexOf(name);
+
+    const dateIdx        = idx('対象日付');
+    const lastNameIdx    = idx('医師氏名（姓）');
+    const firstNameIdx   = idx('医師氏名（名）');
+    const shahoCashIdx   = idx('社保現金入金額');
+    const shahoPaxIdx    = idx('社保患者数');
+    const shahoTenIdx    = idx('社保点数');
+    const kohoCashIdx    = idx('国保現金入金額');
+    const kohoPaxIdx     = idx('国保患者数');
+    const kohoTenIdx     = idx('国保点数');
+    const jifeeCashIdx   = idx('自費現金入金額');
+    const jifeeCardIdx   = idx('自費カード入金額');
+    const jifeePaxIdx    = idx('自費人数');
+    const zasshuCashIdx  = idx('雑収現金入金額');
+    const zasshuPaxIdx   = idx('雑収人数');
+    const kodoDaysIdx    = idx('稼働日数');
+
+    if (dateIdx === -1 || lastNameIdx === -1) return [];
+
+    const results: any[] = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const dateStr = row[dateIdx]?.trim();
+      if (!dateStr || !/^\d{4}\/\d{2}\/\d{2}$/.test(dateStr)) continue;
+
+      const lastName  = row[lastNameIdx]?.trim() ?? '';
+      const firstName = row[firstNameIdx]?.trim() ?? '';
+      const staffName = [lastName, firstName].filter(Boolean).join(' ');
+      if (!staffName) continue;
+
+      const n = (colIdx: number) => {
+        if (colIdx === -1) return 0;
+        const v = parseFloat(String(row[colIdx] ?? '').replace(/,/g, ''));
+        return isNaN(v) ? 0 : v;
+      };
+
+      const date = dateStr.replace(/\//g, '-');
+      const [yearStr, monthStr] = dateStr.split('/');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
+
+      const common = {
+        corporation_id: corpId, clinic_id: clinicId, clinic_name: clinicName,
+        staff_name: staffName, year, month, date, is_target: false,
+        segment: 'staff', staff_role: '', treatment_type: '',
+      };
+
+      [
+        { kpi_name: '社会保険_金額',     value: n(shahoCashIdx) },
+        { kpi_name: '社会保険_点数',     value: n(shahoTenIdx) },
+        { kpi_name: '国民健康保険_金額', value: n(kohoCashIdx) },
+        { kpi_name: '国民健康保険_点数', value: n(kohoTenIdx) },
+        { kpi_name: '自費治療_金額',     value: n(jifeeCashIdx) + n(jifeeCardIdx) },
+        { kpi_name: '雑収入_金額',       value: n(zasshuCashIdx) },
+        { kpi_name: '社会保険_人数',     value: n(shahoPaxIdx) },
+        { kpi_name: '国民健康保険_人数', value: n(kohoPaxIdx) },
+        { kpi_name: '自費治療_人数',     value: n(jifeePaxIdx) },
+        { kpi_name: '雑収入_人数',       value: n(zasshuPaxIdx) },
+        { kpi_name: '稼働日数',          value: n(kodoDaysIdx) },
+      ].forEach(kpi => results.push({ ...common, ...kpi }));
+    }
+    return results;
+  },
+
+  // ステージ日別状況の変換
+  // 取得対象: 予約数・新患予約数・事前/無断キャンセル数・次回予約取得数/率
+  // 除外(Stats が正ソース): 来院人数_* / 当日キャンセル数
+  // 除外(engine が計算): キャンセル率
+  // ※「率」はこのファイル内では "89.45%" のように % 表記 → % を除去してそのまま格納
   transformStage: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     if (data.length < 4) return [];
 
@@ -254,91 +449,81 @@ export const DataImporter = {
 
       if (r1 !== "" && r1 !== "-") {
         currentMajor = r1;
-        currentMiddle = ""; 
+        currentMiddle = "";
       }
       if (r2 !== "" && r2 !== "-") {
         currentMiddle = r2;
       }
-      
+
       const major = currentMajor;
       const middle = currentMiddle;
       const minor = r3;
 
       let kpiName = "";
 
-      // 💡 判定ロジックの修正：中項目（当日次回予約獲得）を優先判定する
       if (middle === "当日次回予約獲得") {
+        // 次回予約取得数・率はこのファイルでのみ取得可能
         if (minor === "人数") kpiName = "次回予約取得数";
         else if (minor === "獲得率") kpiName = "次回予約取得率";
       } else if (major === "予約(人)") {
-        if (middle === "") kpiName = "予約人数_既存患者";
+        // col 2: middle="" → 既存患者の予約数
+        // col 3: middle="新患" → 新患の予約数
+        if (middle === "" && minor === "") kpiName = "予約人数_既存患者";
         else if (middle === "新患") kpiName = "予約人数_新規患者";
-      } else if (major === "来院(人)") {
-        if (middle === "") kpiName = "来院人数_既存患者";
-        else if (middle === "新患") kpiName = "来院人数_新規患者";
-        else if (middle === "ステージ内訳") {
-          kpiName = `来院人数_${toFullWidthKatakana(minor)}`;
-        }
-      } else if (major === "ウェブ予約") {
-        if (middle === "新患") kpiName = "Web予約人数_新患";
-        else if (middle === "再診") kpiName = "Web予約人数_既存";
-      } else if (major === "事前キャンセル(人)" && middle === "") {
+      } else if (major === "事前キャンセル(人)" && middle === "" && minor === "") {
+        // 事前キャンセルはこのファイルでのみ取得可能
         kpiName = "事前キャンセル数";
-      } else if (major === "当日キャンセル(人)" && middle === "") {
-        kpiName = "当日キャンセル数";
-      } else if (major === "無断キャンセル(人)" && middle === "") {
+      } else if (major === "無断キャンセル(人)" && middle === "" && minor === "") {
+        // 無断キャンセルはこのファイルでのみ取得可能
         kpiName = "無断キャンセル数";
-      } else if (major === "キャンセル率" && middle === "") {
-        kpiName = "キャンセル率";
       }
+      // 除外: 来院(人) → Stats の transformStats で取得
+      // 除外: 当日キャンセル(人) → Stats の transformStats で取得
+      // 除外: キャンセル率 → kpi-engine が counts から計算
+      // 除外: ウェブ予約 / 実来院 / リマインド / 未来予約 → 現時点では不要
 
       if (kpiName) columnMapping[j] = kpiName;
     }
 
-    const results = [];
+    const results: any[] = [];
+
     for (let i = 4; i < data.length; i++) {
       const row = data[i];
       if (!row || row.length < 2) continue;
       const firstCell = row[0] ? row[0].trim() : "";
-      
-      if (firstCell === "合計" || firstCell === "月" || firstCell === "" || !firstCell) continue;
 
-      let year, month;
-      if (/^\d{4}\/\d{2}$/.test(firstCell)) {
-        const parts = firstCell.split('/');
-        year = parseInt(parts[0], 10);
-        month = parseInt(parts[1], 10);
-      } else {
-        continue;
-      }
+      // 合計行・ヘッダー行・空行はスキップ
+      if (!firstCell || firstCell === "合計" || firstCell === "月") continue;
+      if (!/^\d{4}\/\d{2}$/.test(firstCell)) continue;
+
+      const [yearStr, monthStr] = firstCell.split('/');
+      const year = parseInt(yearStr, 10);
+      const month = parseInt(monthStr, 10);
 
       const common = {
         corporation_id: corpId,
         clinic_id: clinicId,
         clinic_name: clinicName,
-        staff_name: "", 
-        year: year,
-        month: month,
+        staff_name: '',
+        year,
+        month,
         date: `${year}-${String(month).padStart(2, '0')}-01`,
         is_target: false,
-        segment: 'clinic', 
-        staff_role: null,
-        treatment_type: null
+        segment: 'clinic',
+        staff_role: '',
+        treatment_type: '',
       };
 
       for (const [colIdxStr, kpiName] of Object.entries(columnMapping)) {
         const colIdx = parseInt(colIdxStr);
         let valStr = row[colIdx];
         if (!valStr || valStr.trim() === "" || valStr.trim() === "-") continue;
-        
+
+        // % 表記の率はそのまま数値に変換（例: "89.45%" → 89.45）
         const value = parseFloat(valStr.replace(/,/g, '').replace('%', ''));
         if (isNaN(value)) continue;
 
-        results.push({
-          ...common,
-          kpi_name: kpiName,
-          value: value
-        });
+        results.push({ ...common, kpi_name: kpiName, value });
       }
     }
     return results;

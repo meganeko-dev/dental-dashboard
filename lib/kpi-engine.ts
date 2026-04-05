@@ -12,8 +12,13 @@ const PATIENT_BREAKDOWN_KPIS = [
   '来院人数_矯正', '来院人数_カウンセリング', '来院人数_その他相談'
 ];
 
-// 💡 売上として合算するKPI名のリスト（正しい名称に統一）
+// 💡 売上として合算するKPI名のリスト（旧形式: Stats CSV）
 const REVENUE_KPIS = ['保険治療', '自費治療'];
+
+// 💡 新形式売上KPI (FWLRNER6 月計表CSV)
+const INSURANCE_KPIS  = ['社会保険_金額', '国民健康保険_金額'];
+const PRIVATE_KPIS    = ['自費治療_金額', '雑収入_金額'];
+const SALES_REVENUE_KPIS = [...INSURANCE_KPIS, ...PRIVATE_KPIS];
 
 export const KpiEngine = {
   sumValues: (data: any[], kpiNames: string[]) => {
@@ -24,34 +29,66 @@ export const KpiEngine = {
 
   calc: (data: any[], kpiId: string, maintenanceKeys: string[] = []): number => {
     switch (kpiId) {
-      case 'total_amount': // 売上合計
-        return KpiEngine.sumValues(data, REVENUE_KPIS);
-      
-      case 'avg_price_per_day': // 1日あたりの平均単価
-        const sum_amount_day = KpiEngine.sumValues(data, REVENUE_KPIS);
-        const day_num = KpiEngine.sumValues(data, ['診察日数']);
+      case 'total_amount': { // 売上合計 (旧: 保険治療+自費治療 / 新: 社会保険_金額+国民健康保険_金額+自費治療_金額+雑収入_金額)
+        return KpiEngine.sumValues(data, [...REVENUE_KPIS, ...SALES_REVENUE_KPIS]);
+      }
+
+      case 'avg_price_per_day': { // 1日平均単価 = 売上 / 稼働日数
+        const sum_amount_day = KpiEngine.calc(data, 'total_amount');
+        const day_num = KpiEngine.sumValues(data, ['診療日数', '稼働日数']);
         return day_num > 0 ? sum_amount_day / day_num : 0;
+      }
 
-      case 'recept_price': // レセプト単価
-        const rec_rev = KpiEngine.sumValues(data, REVENUE_KPIS);
-        const rec_num = KpiEngine.sumValues(data, ['レセプト']);
+      case 'insurance_amount': { // 保険売上 = 社会保険_金額 + 国民健康保険_金額
+        return KpiEngine.sumValues(data, INSURANCE_KPIS);
+      }
+
+      case 'insurance_avg_price_per_day': { // 保険1日平均単価 = 保険売上 / 稼働日数
+        const ins_amount = KpiEngine.calc(data, 'insurance_amount');
+        const ins_days = KpiEngine.sumValues(data, ['診療日数', '稼働日数']);
+        return ins_days > 0 ? ins_amount / ins_days : 0;
+      }
+
+      case 'private_amount': { // 自費売上 = 自費治療_金額 + 雑収入_金額
+        return KpiEngine.sumValues(data, PRIVATE_KPIS);
+      }
+
+      case 'private_avg_price_per_day': { // 自費1日平均単価 = 自費売上 / 稼働日数
+        const prv_amount = KpiEngine.calc(data, 'private_amount');
+        const prv_days = KpiEngine.sumValues(data, ['診療日数', '稼働日数']);
+        return prv_days > 0 ? prv_amount / prv_days : 0;
+      }
+
+      case 'recept_count': { // レセプト数 (旧: レセプト / 新: 社会保険_点数 + 国民健康保険_点数)
+        const old_recept = KpiEngine.sumValues(data, ['レセプト']);
+        const new_recept = KpiEngine.sumValues(data, ['社会保険_点数', '国民健康保険_点数']);
+        return old_recept + new_recept;
+      }
+
+      case 'recept_price': { // レセプト単価 = 売上 / レセプト数
+        const rec_rev = KpiEngine.calc(data, 'total_amount');
+        const rec_num = KpiEngine.calc(data, 'recept_count');
         return rec_num > 0 ? rec_rev / rec_num : 0;
+      }
 
-      case 'recept_count': // レセプト数
-        return KpiEngine.sumValues(data, ['レセプト']);
-      
-      case 'avg_price': // 平均単価(来院数)
-        const avg_rev = KpiEngine.sumValues(data, REVENUE_KPIS);
-        const avg_pat = KpiEngine.calc(data, 'patients_count');
+      case 'avg_price': { // 平均単価 = 売上 / (来院人数_既存患者 + 来院人数_新規患者)
+        const avg_rev = KpiEngine.calc(data, 'total_amount');
+        const avg_pat = KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
         return avg_pat > 0 ? avg_rev / avg_pat : 0;
+      }
       
       case 'reserved_count': // 予約数
         return KpiEngine.sumValues(data, ['予約人数_既存患者', '予約人数_新規患者']);
 
+      case 'reserved_rate': // 予約率
+        return KpiEngine.sumValues(data, ['予約率']);
+
       case 'patients_count': // 来院数
         const breakdownSum = KpiEngine.sumValues(data, PATIENT_BREAKDOWN_KPIS);
         if (breakdownSum > 0) return breakdownSum;
-        return KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
+        const stdPatients = KpiEngine.sumValues(data, ['来院人数_既存患者', '来院人数_新規患者']);
+        if (stdPatients > 0) return stdPatients;
+        return KpiEngine.sumValues(data, ['来院患者数']);
 
       case 'visit_rate': // 来院率
         const visit_pat = KpiEngine.calc(data, 'patients_count');
@@ -119,6 +156,136 @@ export const KpiEngine = {
       default:
         return KpiEngine.sumValues(data, [kpiId]);
     }
+  },
+
+  // summarized_clinic_kpi ビューの1行から KPI 値を取得する
+  calcFromSummarized: (row: any, kpiId: string): number => {
+    if (!row) return 0;
+    const g = (col: string) => Number(row[col]) || 0;
+    switch (kpiId) {
+      case 'total_amount':              return g('total_amount');
+      case 'avg_price_per_day':         return g('working_days') > 0 ? g('total_amount') / g('working_days') : 0;
+      case 'insurance_amount':          return g('insurance_amount');
+      case 'insurance_avg_price_per_day':
+      case 'avg_insurance_price_per_day': return g('working_days') > 0 ? g('insurance_amount') / g('working_days') : 0;
+      case 'private_amount':            return g('private_amount');
+      case 'private_avg_price_per_day':
+      case 'avg_private_price_per_day': return g('working_days') > 0 ? g('private_amount') / g('working_days') : 0;
+      case 'recept_count':              return g('recept_count');
+      case 'recept_price':              return g('recept_count') > 0 ? g('total_amount') / g('recept_count') : 0;
+      case 'avg_price':                 return g('patients_count') > 0 ? g('total_amount') / g('patients_count') : 0;
+      case 'patients_count':            return g('patients_count');
+      case 'reserved_count':            return g('reserved_count');
+      case 'reserved_rate':             return g('reserved_count') > 0 ? (g('patients_count') / g('reserved_count')) * 100 : 0;
+      case 'visit_rate':                return g('reserved_count') > 0 ? (g('patients_count') / g('reserved_count')) * 100 : 0;
+      case 'next_reserve_count':
+      case 'today_reserve_count':       return g('next_reserve_count');
+      case 'next_reserve_rate':
+      case 'today_reserve_rate':        return g('next_reserve_rate');
+      case 'cancel_count':              return g('today_cancel_count') + g('noshow_cancel_count');
+      case 'cancel_rate': {
+        const res = g('reserved_count');
+        return res > 0 ? ((g('today_cancel_count') + g('noshow_cancel_count')) / res) * 100 : 0;
+      }
+      case 'today_cancel_count':        return g('today_cancel_count');
+      case 'today_cancel_rate': {
+        const res = g('reserved_count');
+        return res > 0 ? (g('today_cancel_count') / res) * 100 : 0;
+      }
+      case 'noshow_cancel_count':       return g('noshow_cancel_count');
+      case 'noshow_cancel_rate': {
+        const res = g('reserved_count');
+        return res > 0 ? (g('noshow_cancel_count') / res) * 100 : 0;
+      }
+      case 'prior_cancel_count':        return g('prior_cancel_count');
+      case 'prior_cancel_rate': {
+        const res = g('reserved_count');
+        return res > 0 ? (g('prior_cancel_count') / res) * 100 : 0;
+      }
+      case 'churn_patients_rate':       return g('churn_patients_rate');
+      case 'churn_patients_count':      return g('churn_patients_count');
+      case 'chair_util_rate':           return g('chair_util_rate');
+      case 'new_patients_count':        return g('new_patients_count');
+      case 'mente_count':               return g('mente_count');
+      case 'mente_rate':                return g('mente_rate');
+      default:                          return 0;
+    }
+  },
+
+  // summarized_clinic_kpi の履歴行配列から着地予測を計算する
+  calculateForecastFromSummarized: (rows: any[], kpiId: string, currentYear: number, currentMonth: number): number | null => {
+    if (!rows || rows.length === 0) return null;
+    const sorted = [...rows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    const past = sorted.filter(r => r.year < currentYear || (r.year === currentYear && r.month < currentMonth));
+    if (past.length === 0) return null;
+    const recent = past.slice(-3);
+    const sum = recent.reduce((acc, r) => acc + KpiEngine.calcFromSummarized(r, kpiId), 0);
+    return sum / recent.length;
+  },
+
+  // summarized_staff_kpi ビューの1行から KPI 値を取得する
+  calcFromSummarizedStaff: (row: any, kpiId: string): number => {
+    if (!row) return 0;
+    const g = (col: string) => Number(row[col]) || 0;
+    switch (kpiId) {
+      case 'total_amount':                  return g('total_amount');
+      case 'avg_price_per_day':             return g('working_days') > 0 ? g('total_amount') / g('working_days') : 0;
+      case 'insurance_amount':              return g('insurance_amount');
+      case 'insurance_avg_price_per_day':
+      case 'avg_insurance_price_per_day':   return g('working_days') > 0 ? g('insurance_amount') / g('working_days') : 0;
+      case 'private_amount':                return g('private_amount');
+      case 'private_avg_price_per_day':
+      case 'avg_private_price_per_day':     return g('working_days') > 0 ? g('private_amount') / g('working_days') : 0;
+      case 'recept_count':                  return g('recept_count');
+      case 'recept_price':                  return g('recept_price');
+      case 'avg_price':                     return g('avg_price');
+      case 'patients_count':                return g('patients_count');
+      case 'new_patients_count':            return 0;
+      case 'reserved_count':                return g('reserved_patients_count');
+      case 'reserved_rate': {
+        const res = g('reserved_patients_count');
+        return res > 0 ? (g('patients_count') / res) * 100 : 0;
+      }
+      case 'visit_rate': {
+        const res = g('reserved_patients_count');
+        return res > 0 ? (g('patients_count') / res) * 100 : 0;
+      }
+      case 'next_reserve_count':
+      case 'today_reserve_count':           return 0;
+      case 'next_reserve_rate':
+      case 'today_reserve_rate':            return g('reserved_rate');
+      case 'cancel_count':                  return g('today_cancel_count');
+      case 'cancel_rate': {
+        const res = g('reserved_patients_count');
+        return res > 0 ? (g('today_cancel_count') / res) * 100 : 0;
+      }
+      case 'today_cancel_count':            return g('today_cancel_count');
+      case 'today_cancel_rate': {
+        const res = g('reserved_patients_count');
+        return res > 0 ? (g('today_cancel_count') / res) * 100 : 0;
+      }
+      case 'noshow_cancel_count':           return 0;
+      case 'noshow_cancel_rate':            return 0;
+      case 'prior_cancel_count':            return 0;
+      case 'prior_cancel_rate':             return 0;
+      case 'churn_patients_rate':           return g('churn_patients_rate');
+      case 'churn_patients_count':          return g('churn_patients_count');
+      case 'chair_util_rate':               return g('chair_util_rate');
+      case 'mente_count':                   return 0;
+      case 'mente_rate':                    return 0;
+      default:                              return 0;
+    }
+  },
+
+  // summarized_staff_kpi の履歴行配列から着地予測を計算する
+  calculateForecastFromSummarizedStaff: (rows: any[], kpiId: string, currentYear: number, currentMonth: number): number | null => {
+    if (!rows || rows.length === 0) return null;
+    const sorted = [...rows].sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    const past = sorted.filter(r => r.year < currentYear || (r.year === currentYear && r.month < currentMonth));
+    if (past.length === 0) return null;
+    const recent = past.slice(-3);
+    const sum = recent.reduce((acc, r) => acc + KpiEngine.calcFromSummarizedStaff(r, kpiId), 0);
+    return sum / recent.length;
   },
 
   calcRatio: (val: number, base: number) => {

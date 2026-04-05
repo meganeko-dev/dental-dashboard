@@ -239,71 +239,130 @@ export function DataUpload({ corpId }: { corpId: string }) {
           let clinicId = "";
           let filePattern = "";
 
+          // 年プレフィックス (2025_, 2026_ 等) を除去してから先頭の数字列を clinicId として取得
+          const rawPart = nameParts[0].length === 4 && !isNaN(Number(nameParts[0])) ? nameParts[1] : nameParts[0];
+          clinicId = rawPart.match(/^\d+/)?.[0] ?? rawPart;
+
           if (fileName.includes("月ごとのStats")) {
-            clinicId = nameParts[0];
             filePattern = "stats";
           } else if (fileName.includes("医院状況")) {
-            clinicId = nameParts[0];
             filePattern = "status";
           } else if (fileName.includes("日別状況")) {
-            clinicId = nameParts[0].length === 4 && !isNaN(Number(nameParts[0])) ? nameParts[1] : nameParts[0];
             filePattern = "stage";
+          } else if (fileName.includes("全Ｄｒ日別")) {
+            filePattern = "sales_clinic";
+            clinicId = "(CSVより取得)";
+          } else if (fileName.includes("月計表") && fileName.includes("総括")) {
+            filePattern = "sales_staff";
+            clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「月ごとのStats」「医院状況」「日別状況」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」のいずれかが含まれている必要があります。');
           }
-          
+
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
-          
-          // 💡 RLSエラーを詳細にキャッチするためのログを追加
-          const { data: clinicData, error: clinicError } = await supabase
-            .from('clinics')
-            .select('name, corporation_id')
-            .eq('id', clinicId)
-            .single();
 
-          if (clinicError) {
-             addLog(`[DBエラー詳細] Clinics取得失敗: ${clinicError.message} (Code: ${clinicError.code})`);
-             throw new Error(`ID: ${clinicId} に合致する情報が「clinics」テーブルに見つかりません。`);
-          }
-          if (!clinicData) {
-             throw new Error(`ID: ${clinicId} のデータが空で返されました（RLSでブロックされている可能性があります）。`);
-          }
+          // ── FWLRNER6専用: 月計表ファイル処理 ──────────────────────────────
+          if (filePattern === 'sales_clinic' || filePattern === 'sales_staff') {
+            if (profile?.corporation_id !== 'FWLRNER6') {
+              throw new Error('このファイル形式（月計表）は対応していない法人アカウントです。');
+            }
 
-          const clinicName = clinicData.name;
-          const targetCorpId = clinicData.corporation_id;
-          
-          if (profile?.corporation_id !== targetCorpId) {
-            throw new Error(`権限エラー: このデータの法人(${targetCorpId})は、現在の通信アカウント(${profile?.corporation_id})と一致しません。`);
-          }
+            const rawData = await DataImporter.parseCSVAsArraySJIS(file);
+            if (rawData.length < 2) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');
 
-          const rawData = await DataImporter.parseCSVAsArray(file)
-          if (rawData.length === 0) throw new Error('CSVファイルが空か、正しく読み込めませんでした。')
-          
-          let transformed: any[] = [];
-          if (filePattern === 'stats') {
-            transformed = DataImporter.transformStats(rawData, clinicName, targetCorpId, clinicId);
-          } else if (filePattern === 'status') {
-            transformed = DataImporter.transformStatus(rawData, clinicName, targetCorpId, clinicId);
-          } else if (filePattern === 'stage') {
-            transformed = DataImporter.transformStage(rawData, clinicName, targetCorpId, clinicId);
-          }
+            // 診療所名 から短いクリニック名を抽出（例: "医療法人　藤美会　新美歯科" → "新美歯科"）
+            const headerRow = rawData[0] ?? [];
+            const clinicNameColIdx = headerRow.findIndex(h => h?.trim() === '診療所名');
+            const clinicFullName = clinicNameColIdx >= 0 ? (rawData[1]?.[clinicNameColIdx]?.trim() ?? '') : '';
+            const extractedClinicName = clinicFullName.split(/[\s　]+/).filter(Boolean).at(-1) ?? clinicFullName;
 
-          addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`)
+            const { data: salesClinicData, error: salesClinicError } = await supabase
+              .from('clinics')
+              .select('id, name, corporation_id')
+              .eq('corporation_id', profile.corporation_id)
+              .eq('name', extractedClinicName)
+              .single();
 
-          const chunkSize = 100;
-          for (let j = 0; j < transformed.length; j += chunkSize) {
-            const chunk = transformed.slice(j, j + chunkSize);
-            const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
-              onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
-            });
-            
-            if (insertError) {
+            if (salesClinicError) {
+              addLog(`[DBエラー詳細] Clinics取得失敗: ${salesClinicError.message} (Code: ${salesClinicError.code})`);
+              throw new Error(`クリニック名 "${extractedClinicName}" に合致する情報が「clinics」テーブルに見つかりません。`);
+            }
+
+            const salesClinicName = salesClinicData.name;
+            const salesClinicId   = String(salesClinicData.id);
+            const salesCorpId     = salesClinicData.corporation_id;
+
+            const transformed = filePattern === 'sales_clinic'
+              ? DataImporter.transformSalesClinic(rawData, salesClinicName, salesCorpId, salesClinicId)
+              : DataImporter.transformSalesStaff(rawData, salesClinicName, salesCorpId, salesClinicId);
+
+            addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
+
+            const chunkSize = 100;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
+                onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
+              });
+              if (insertError) {
                 addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
                 throw new Error(`保存エラー: ${insertError.message}`);
+              }
             }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
+          // ── 通常ファイル処理 ────────────────────────────────────────────────
+          } else {
+            const { data: clinicData, error: clinicError } = await supabase
+              .from('clinics')
+              .select('name, corporation_id')
+              .eq('id', clinicId)
+              .single();
+
+            if (clinicError) {
+               addLog(`[DBエラー詳細] Clinics取得失敗: ${clinicError.message} (Code: ${clinicError.code})`);
+               throw new Error(`ID: ${clinicId} に合致する情報が「clinics」テーブルに見つかりません。`);
+            }
+            if (!clinicData) {
+               throw new Error(`ID: ${clinicId} のデータが空で返されました（RLSでブロックされている可能性があります）。`);
+            }
+
+            const clinicName = clinicData.name;
+            const targetCorpId = clinicData.corporation_id;
+
+            if (profile?.corporation_id !== targetCorpId) {
+              throw new Error(`権限エラー: このデータの法人(${targetCorpId})は、現在の通信アカウント(${profile?.corporation_id})と一致しません。`);
+            }
+
+            const rawData = await DataImporter.parseCSVAsArray(file);
+            if (rawData.length === 0) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');
+
+            let transformed: any[] = [];
+            if (filePattern === 'stats') {
+              transformed = DataImporter.transformStats(rawData, clinicName, targetCorpId, clinicId);
+            } else if (filePattern === 'status') {
+              transformed = DataImporter.transformStatus(rawData, clinicName, targetCorpId, clinicId);
+            } else if (filePattern === 'stage') {
+              transformed = DataImporter.transformStage(rawData, clinicName, targetCorpId, clinicId);
+            }
+
+            addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
+
+            const chunkSize = 100;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
+                onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
+              });
+              if (insertError) {
+                addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
+                throw new Error(`保存エラー: ${insertError.message}`);
+              }
+            }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
           }
-          
-          addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`)
 
         } catch (fileErr: any) {
           console.error(fileErr)

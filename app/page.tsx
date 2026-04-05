@@ -17,10 +17,10 @@ const DASHBOARD_TABS = [
       { id: 'total_amount', label: '売上', unit: '円' },
       { id: 'avg_price_per_day', label: '1日平均単価', unit: '円' },
       { id: 'insurance_amount', label: '保険売上', unit: '円' },
-      { id: 'avg_insurance_price_per_day', label: '保険1日平均単価', unit: '円' },
-      { id: 'self_amount', label: '自費売上', unit: '円' },
-      { id: 'avg_self_price_per_day', label: '自費1日平均単価', unit: '円' },
-      { id: 'recept_price', label: 'レセプト単価', unit: '円' },
+      { id: 'insurance_avg_price_per_day', label: '保険1日平均単価', unit: '円' },
+      { id: 'private_amount', label: '自費売上', unit: '円' },
+      { id: 'private_avg_price_per_day', label: '自費1日平均単価', unit: '円' },
+      { id: 'recept_price', label: 'レセプト単価', unit: '円/点' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
       { id: 'patients_count', label: '来院数', unit: '名' },
@@ -31,6 +31,8 @@ const DASHBOARD_TABS = [
     label: '予約精度',
     items: [
       { id: 'reserved_count', label: '予約数', unit: '名' },
+      { id: 'reserved_rate', label: '予約率', unit: '%' },
+      { id: 'patients_count', label: '来院数', unit: '名' },
       { id: 'visit_rate', label: '来院率', unit: '%' },
       { id: 'today_reserve_count', label: '当日予約取得数', unit: '件' },
       { id: 'today_reserve_rate', label: '当日予約取得率', unit: '%' },
@@ -50,9 +52,13 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
+      { id: 'mente_count', label: '初回メンテナンス数', unit: '件'},
+      { id: 'new_patients_count', label: '新患数', unit: '件'},
+      { id: 'churn_patients_count', label: '未予約数', unit: '名' },
+      { id: 'churn_patients_rate', label: '未予約率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
-      { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
+      // { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
     ]
   }
 ]
@@ -87,6 +93,7 @@ export default function Dashboard() {
   const [clinics, setClinics] = useState<string[]>([])
   const [targetClinic, setTargetClinic] = useState('')
   const [compareClinic, setCompareClinic] = useState('')
+  const [availablePeriods, setAvailablePeriods] = useState<{year: number, month: number}[]>([])
   const [selectedYear, setSelectedYear] = useState(2025)
   const [selectedMonth, setSelectedMonth] = useState(6)
   const [activeTab, setActiveTab] = useState('profitability')
@@ -122,15 +129,33 @@ export default function Dashboard() {
         .from('unique_clinic_options')
         .select('clinic_name')
         .eq('corporation_id', corpId)
-      
+
       const names = Array.from(new Set(clinicRes?.map(d => d.clinic_name))).sort()
       setClinics(names)
-      
+
       if (names.length > 0) {
         setTargetClinic(names[0])
         setCompareClinic(names[1] || names[0])
       } else {
         setLoading(false)
+      }
+
+      const { data: periodData } = await supabase
+        .from('summarized_clinic_kpi')
+        .select('year, month')
+        .eq('corporation_id', corpId)
+        .or('total_amount.gt.0,patients_count.gt.0')
+        .order('year', { ascending: true })
+        .order('month', { ascending: true })
+
+      if (periodData && periodData.length > 0) {
+        const periods = [...new Map(
+          periodData.map(d => [`${d.year}-${d.month}`, { year: Number(d.year), month: Number(d.month) }])
+        ).values()].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+        setAvailablePeriods(periods)
+        const latest = periods[periods.length - 1]
+        setSelectedYear(latest.year)
+        setSelectedMonth(latest.month)
       }
 
       const { data: goalData } = await supabase
@@ -165,14 +190,15 @@ export default function Dashboard() {
       const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
       const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
 
+      // summarized_clinic_kpi から取得（月1行のみ / 年12行のみ → 上限問題なし）
       const [targetRes, compRes, prevRes, lastYearRes, historyRes] = await Promise.all([
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('segment', 'clinic').eq('year', selectedYear).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', prevYear).eq('month', prevMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear - 1).eq('month', selectedMonth),
-        supabase.from('flexible_kpis').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('year', selectedYear).order('month', { ascending: true })
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', prevYear).eq('month', prevMonth),
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear - 1).eq('month', selectedMonth),
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
       ])
-      
+
       setTargetData(targetRes.data || [])
       setCompData(compRes.data || [])
       setPrevData(prevRes.data || [])
@@ -183,21 +209,39 @@ export default function Dashboard() {
     fetchData()
   }, [targetClinic, compareClinic, selectedYear, selectedMonth, corpId, authLoading, supabase])
 
+  const availableYears = useMemo(() =>
+    [...new Set(availablePeriods.map(p => p.year))].sort((a, b) => a - b),
+    [availablePeriods]
+  )
+
+  const availableMonths = useMemo(() =>
+    availablePeriods.filter(p => p.year === selectedYear).map(p => p.month).sort((a, b) => a - b),
+    [availablePeriods, selectedYear]
+  )
+
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year)
+    const months = availablePeriods.filter(p => p.year === year).map(p => p.month).sort((a, b) => a - b)
+    if (months.length > 0 && !months.includes(selectedMonth)) {
+      setSelectedMonth(months[months.length - 1])
+    }
+  }
+
   const chartData = useMemo(() => {
     return Array.from({ length: 12 }, (_, i) => {
       const m = i + 1;
-      const monthlyData = historyData.filter(h => h.month === m);
+      const row = historyData.find(h => h.month === m) || null;
       return {
         name: `${m}月`,
-        売上: KpiEngine.calc(monthlyData, 'total_amount', maintenanceKeys),
-        来院人数: KpiEngine.calc(monthlyData, 'patients_count', maintenanceKeys),
-        次回予約取得率: KpiEngine.calc(monthlyData, 'next_reserve_rate', maintenanceKeys),
-        キャンセル率: KpiEngine.calc(monthlyData, 'cancel_rate', maintenanceKeys),
-        メンテナンス率: KpiEngine.calc(monthlyData, 'mente_rate', maintenanceKeys),
-        離脱率: KpiEngine.calc(monthlyData, 'churn_patients_rate', maintenanceKeys)
+        売上: KpiEngine.calcFromSummarized(row, 'total_amount'),
+        来院人数: KpiEngine.calcFromSummarized(row, 'patients_count'),
+        次回予約取得率: KpiEngine.calcFromSummarized(row, 'next_reserve_rate'),
+        キャンセル率: KpiEngine.calcFromSummarized(row, 'cancel_rate'),
+        メンテナンス率: KpiEngine.calcFromSummarized(row, 'mente_rate'),
+        離脱率: KpiEngine.calcFromSummarized(row, 'churn_patients_rate'),
       };
     });
-  }, [historyData, maintenanceKeys]);
+  }, [historyData]);
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -231,11 +275,11 @@ export default function Dashboard() {
             <div className="flex flex-col gap-1">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Select Period</label>
               <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl h-[42px] items-center">
-                <select value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
-                  {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}年</option>)}
+                <select value={selectedYear} onChange={e => handleYearChange(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
+                  {availableYears.map(y => <option key={y} value={y}>{y}年</option>)}
                 </select>
                 <select value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))} className="bg-transparent border-none text-xs font-black px-3 focus:ring-0 outline-none cursor-pointer">
-                  {Array.from({length: 12}, (_, i) => i + 1).map(m => <option key={m} value={m}>{m}月</option>)}
+                  {availableMonths.map(m => <option key={m} value={m}>{m}月</option>)}
                 </select>
               </div>
             </div>
@@ -256,7 +300,15 @@ export default function Dashboard() {
               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 'bold', fill: '#94a3b8'}} />
               <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
-              <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+
+              {/* <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} /> */}
+              <Tooltip 
+                contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
+                formatter={(value: number) => {
+                  return value.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
+                }}
+              />
+
               <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 
               {activeTab === 'profitability' && (
@@ -291,19 +343,24 @@ export default function Dashboard() {
         {/* KPIカード一覧 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {DASHBOARD_TABS.find(t => t.id === activeTab)?.items.map(kpi => {
-            const val = KpiEngine.calc(targetData, kpi.id, maintenanceKeys)
-            const prevVal = KpiEngine.calc(prevData, kpi.id, maintenanceKeys)
-            const lastYearVal = KpiEngine.calc(lastYearData, kpi.id, maintenanceKeys)
-            const compClinicVal = KpiEngine.calc(compData, kpi.id, maintenanceKeys)
-            const goal = goals[kpi.label] || 0
-            
-            const finalCompVal = mode === 'single' ? lastYearVal : compClinicVal
-            const finalCompLabel = mode === 'single' ? '前年同月' : compareClinic
+            const targetRow   = targetData[0]   || null;
+            const prevRow     = prevData[0]      || null;
+            const lastYearRow = lastYearData[0]  || null;
+            const compRow     = compData[0]      || null;
 
-            const mom = KpiEngine.calcRatio(val, prevVal)
-            const achievement = KpiEngine.calcRatio(val, goal)
+            const val          = KpiEngine.calcFromSummarized(targetRow,   kpi.id);
+            const prevVal      = KpiEngine.calcFromSummarized(prevRow,     kpi.id);
+            const lastYearVal  = KpiEngine.calcFromSummarized(lastYearRow, kpi.id);
+            const compClinicVal = KpiEngine.calcFromSummarized(compRow,    kpi.id);
+            const goal = goals[kpi.label] || 0;
 
-            const forecast = KpiEngine.calculateForecast(historyData, kpi.id, selectedYear, selectedMonth, maintenanceKeys);
+            const finalCompVal   = mode === 'single' ? lastYearVal : compClinicVal;
+            const finalCompLabel = mode === 'single' ? '前年同月' : compareClinic;
+
+            const mom         = KpiEngine.calcRatio(val, prevVal);
+            const achievement = KpiEngine.calcRatio(val, goal);
+
+            const forecast = KpiEngine.calculateForecastFromSummarized(historyData, kpi.id, selectedYear, selectedMonth);
 
             return (
               <KpiCard
