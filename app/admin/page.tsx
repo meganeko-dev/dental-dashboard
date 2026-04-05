@@ -9,7 +9,6 @@ import { DataUpload } from '@/components/admin/DataUpload'
 import { GoalSetter } from '@/components/admin/GoalSetter'
 import { DataEditor } from '@/components/admin/DataEditor'
 import { MappingManager } from '@/components/admin/MappingManager'
-import { MaintenanceSetter } from '@/components/admin/MaintenanceSetter'
 import { InsuranceRevenueSetter } from '@/components/admin/InsuranceRevenueSetter'
 
 export default function AdminPage() {
@@ -22,7 +21,7 @@ export default function AdminPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'maintenance' | 'insurance'>('upload')
+  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'insurance'>('upload')
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -44,8 +43,7 @@ export default function AdminPage() {
         <nav className="space-y-2 flex-1">
           <MenuButton active={activeMenu === 'upload'} onClick={() => setActiveMenu('upload')} icon="📤" label="データアップロード" />
           <MenuButton active={activeMenu === 'goals'} onClick={() => setActiveMenu('goals')} icon="🎯" label="目標入力" />
-          <MenuButton active={activeMenu === 'insurance'} onClick={() => setActiveMenu('insurance')} icon="💰" label="保険売上入力" />
-          <MenuButton active={activeMenu === 'maintenance'} onClick={() => setActiveMenu('maintenance')} icon="🧼" label="メンテナンス設定" />
+          <MenuButton active={activeMenu === 'insurance'} onClick={() => setActiveMenu('insurance')} icon="💰" label="売上データ入力" />
           <MenuButton active={activeMenu === 'edit'} onClick={() => setActiveMenu('edit')} icon="📝" label="データ修正" />
           {/* 条件付きレンダリング: 特定法人以外にはボタン自体を表示しない */}
           {showMapping && (
@@ -76,7 +74,6 @@ export default function AdminPage() {
           {activeMenu === 'upload' && <DataUpload corpId={corpId} />}
           {activeMenu === 'goals' && <GoalSetter corpId={corpId} />}
           {activeMenu === 'insurance' && <InsuranceRevenueSetter corpId={corpId} mode={mode} />}
-          {activeMenu === 'maintenance' && <MaintenanceSetter corpId={corpId} />}
           {activeMenu === 'edit' && <DataEditor corpId={corpId} mode={mode} />}
           
           {/* コンテンツ側でもガードをかける */}

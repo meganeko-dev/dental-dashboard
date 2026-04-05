@@ -52,10 +52,10 @@ const DASHBOARD_TABS = [
     items: [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
-      { id: 'mente_count', label: '初回メンテナンス数', unit: '件'},
+      { id: 'first_mente_count', label: '初回メンテナンス数', unit: '件'},
       { id: 'new_patients_count', label: '新患数', unit: '件'},
-      { id: 'churn_patients_count', label: '未予約数', unit: '名' },
-      { id: 'churn_patients_rate', label: '未予約率', unit: '%' },
+      { id: 'unreserved_count', label: '未予約数', unit: '名' },
+      { id: 'unreserved_rate', label: '未予約率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
       // { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
@@ -99,7 +99,6 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('profitability')
   
   const [goals, setGoals] = useState<Record<string, number>>({})
-  const [maintenanceKeys, setMaintenanceKeys] = useState<string[]>([])
   const [targetData, setTargetData] = useState<any[]>([])
   const [compData, setCompData] = useState<any[]>([])
   const [prevData, setPrevData] = useState<any[]>([])
@@ -169,15 +168,6 @@ export default function Dashboard() {
         formattedGoals[d.key] = Number(d.value)
       })
       setGoals(formattedGoals)
-
-      const { data: maintData } = await supabase
-        .from('data_mappings')
-        .select('key')
-        .eq('mapping_type', 'is_maintenance')
-        .eq('value', 'true')
-        .eq('corporation_id', corpId)
-      
-      setMaintenanceKeys(maintData?.map(d => d.key) || [])
     }
     init()
   }, [corpId, authLoading, supabase])
@@ -364,7 +354,7 @@ export default function Dashboard() {
 
             return (
               <KpiCard
-                key={kpi.id}
+                key={kpi.label}
                 kpiId={kpi.id}
                 label={kpi.label}
                 value={val}

@@ -143,14 +143,25 @@ export const KpiEngine = {
         return KpiEngine.sumValues(data, ['離脱率']);
 
       case 'mente_count': {
-        const menteKpiNames = maintenanceKeys.map(key => `来院人数_${key}`);
-        return KpiEngine.sumValues(data, menteKpiNames);
+        return KpiEngine.sumValues(data, ['メンテナンス数']);
       }
 
       case 'mente_rate': {
-        const menteCount = KpiEngine.calc(data, 'mente_count', maintenanceKeys);
+        const menteCount = KpiEngine.calc(data, 'mente_count');
         const totalPatients = KpiEngine.calc(data, 'patients_count');
         return totalPatients > 0 ? (menteCount / totalPatients) * 100 : 0;
+      }
+
+      case 'first_mente_count': {
+        return KpiEngine.sumValues(data, ['初回メンテナンス数']);
+      }
+
+      case 'unreserved_count': {
+        return KpiEngine.sumValues(data, ['未予約数']);
+      }
+
+      case 'unreserved_rate': {
+        return KpiEngine.sumValues(data, ['未予約率']);
       }
 
       default:
@@ -208,6 +219,9 @@ export const KpiEngine = {
       case 'new_patients_count':        return g('new_patients_count');
       case 'mente_count':               return g('mente_count');
       case 'mente_rate':                return g('mente_rate');
+      case 'first_mente_count':         return g('first_mente_count');
+      case 'unreserved_count':          return g('unreserved_count');
+      case 'unreserved_rate':           return g('unreserved_rate');
       default:                          return 0;
     }
   },

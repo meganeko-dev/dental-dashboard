@@ -255,8 +255,17 @@ export function DataUpload({ corpId }: { corpId: string }) {
           } else if (fileName.includes("月計表") && fileName.includes("総括")) {
             filePattern = "sales_staff";
             clinicId = "(CSVより取得)";
+          } else if (fileName.includes("新心会") && fileName.includes("レセプト数")) {
+            filePattern = "shinsinkai_recept";
+            clinicId = "(CSVより取得)";
+          } else if (fileName.includes("新心会") && fileName.includes("保険売上")) {
+            filePattern = "shinsinkai_insurance";
+            clinicId = "(CSVより取得)";
+          } else if (fileName.includes("新心会") && fileName.includes("自費売上")) {
+            filePattern = "shinsinkai_private";
+            clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
@@ -296,6 +305,36 @@ export function DataUpload({ corpId }: { corpId: string }) {
               ? DataImporter.transformSalesClinic(rawData, salesClinicName, salesCorpId, salesClinicId)
               : DataImporter.transformSalesStaff(rawData, salesClinicName, salesCorpId, salesClinicId);
 
+            addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
+
+            const chunkSize = 100;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
+                onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
+              });
+              if (insertError) {
+                addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
+                throw new Error(`保存エラー: ${insertError.message}`);
+              }
+            }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
+          // ── TN32FBH8専用: 新心会 売上CSV処理 ──────────────────────────────
+          } else if (filePattern === 'shinsinkai_recept' || filePattern === 'shinsinkai_insurance' || filePattern === 'shinsinkai_private') {
+            if (profile?.corporation_id !== 'TN32FBH8') {
+              throw new Error('このファイル形式（新心会売上CSV）は対応していない法人アカウントです。');
+            }
+
+            const kpiType = filePattern === 'shinsinkai_recept' ? 'recept'
+                          : filePattern === 'shinsinkai_insurance' ? 'insurance'
+                          : 'private';
+
+            const rawData = await DataImporter.parseCSVAsArray(file);
+            if (rawData.length < 2) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');
+
+            const transformed = DataImporter.transformShinshinkai(rawData, 'TN32FBH8', kpiType);
             addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
 
             const chunkSize = 100;

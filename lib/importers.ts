@@ -340,9 +340,9 @@ export const DataImporter = {
       };
 
       [
-        { kpi_name: '社会保険_金額',     value: shahoCash },
+        { kpi_name: '社会保険_金額',     value: shahoTen * 10 },
         { kpi_name: '社会保険_点数',     value: shahoTen },
-        { kpi_name: '国民健康保険_金額', value: kohoCash },
+        { kpi_name: '国民健康保険_金額', value: kohoTen * 10 },
         { kpi_name: '国民健康保険_点数', value: kohoTen },
         { kpi_name: '自費治療_金額',     value: jifeeKingaku },
         { kpi_name: '雑収入_金額',       value: zasshuCash },
@@ -410,9 +410,9 @@ export const DataImporter = {
       };
 
       [
-        { kpi_name: '社会保険_金額',     value: n(shahoCashIdx) },
+        { kpi_name: '社会保険_金額',     value: n(shahoTenIdx) * 10 },
         { kpi_name: '社会保険_点数',     value: n(shahoTenIdx) },
-        { kpi_name: '国民健康保険_金額', value: n(kohoCashIdx) },
+        { kpi_name: '国民健康保険_金額', value: n(kohoTenIdx) * 10 },
         { kpi_name: '国民健康保険_点数', value: n(kohoTenIdx) },
         { kpi_name: '自費治療_金額',     value: n(jifeeCashIdx) + n(jifeeCardIdx) },
         { kpi_name: '雑収入_金額',       value: n(zasshuCashIdx) },
@@ -422,6 +422,70 @@ export const DataImporter = {
         { kpi_name: '雑収入_人数',       value: n(zasshuPaxIdx) },
         { kpi_name: '稼働日数',          value: n(kodoDaysIdx) },
       ].forEach(kpi => results.push({ ...common, ...kpi }));
+    }
+    return results;
+  },
+
+  // TN32FBH8専用: 新心会 売上CSV（レセプト数 / 保険売上 / 自費売上）
+  // フォーマット: 法人名, 医院ID, 医院名, 202501, 202502, ...
+  // 保険売上・自費売上は千円単位のため × 1000 して円に変換
+  transformShinshinkai: (
+    data: string[][],
+    corpId: string,
+    kpiType: 'recept' | 'insurance' | 'private'
+  ): any[] => {
+    if (data.length < 2) return [];
+
+    const KPI_NAME_MAP = {
+      recept:    'レセプト',
+      insurance: '社会保険_金額',
+      private:   '自費治療_金額',
+    };
+    const MULTIPLY_MAP = {
+      recept:    1,
+      insurance: 1000,
+      private:   1000,
+    };
+
+    const kpiName = KPI_NAME_MAP[kpiType];
+    const multiply = MULTIPLY_MAP[kpiType];
+    const headers = data[0];
+    const results: any[] = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const clinicId   = row[1]?.trim() ?? '';
+      const clinicName = row[2]?.trim() ?? '';
+      if (!clinicName) continue;
+
+      for (let j = 3; j < headers.length; j++) {
+        const ym = headers[j]?.trim();
+        if (!ym || !/^\d{6}$/.test(ym)) continue;
+
+        const valStr = (row[j] ?? '').replace(/,/g, '').trim();
+        if (valStr === '') continue;
+        const val = parseFloat(valStr);
+        if (isNaN(val)) continue;
+
+        const year  = parseInt(ym.substring(0, 4), 10);
+        const month = parseInt(ym.substring(4, 6), 10);
+
+        results.push({
+          corporation_id: corpId,
+          clinic_id:      clinicId,
+          clinic_name:    clinicName,
+          staff_name:     '',
+          year,
+          month,
+          date:           `${year}-${String(month).padStart(2, '0')}-01`,
+          segment:        'clinic',
+          kpi_name:       kpiName,
+          value:          val * multiply,
+          is_target:      false,
+          treatment_type: '',
+          staff_role:     '',
+        });
+      }
     }
     return results;
   },
