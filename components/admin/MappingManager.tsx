@@ -129,15 +129,14 @@
 // }
 
 'use client'
-import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { useState, useEffect, useMemo } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
 
 export function MappingManager({ corpId }: { corpId: string }) {
+  const supabase = useMemo(() => createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), [])
   const [tab, setTab] = useState<'clinic' | 'staff'>('clinic')
 
   return (
@@ -146,12 +145,12 @@ export function MappingManager({ corpId }: { corpId: string }) {
         <button onClick={() => setTab('clinic')} className={`pb-3 text-sm font-bold transition-all px-4 ${tab === 'clinic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>医院名</button>
         <button onClick={() => setTab('staff')} className={`pb-3 text-sm font-bold transition-all px-4 ${tab === 'staff' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>役職</button>
       </div>
-      {tab === 'clinic' ? <ClinicMappingSection corpId={corpId} /> : <StaffMappingSection corpId={corpId} />}
+      {tab === 'clinic' ? <ClinicMappingSection corpId={corpId} supabase={supabase} /> : <StaffMappingSection corpId={corpId} supabase={supabase} />}
     </div>
   )
 }
 
-function ClinicMappingSection({ corpId }: { corpId: string }) {
+function ClinicMappingSection({ corpId, supabase }: { corpId: string, supabase: any }) {
   const [mappings, setMappings] = useState<any[]>([])
   const [key, setKey] = useState(''); const [val, setVal] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null); const [editValue, setEditValue] = useState('')
@@ -211,9 +210,9 @@ function ClinicMappingSection({ corpId }: { corpId: string }) {
   )
 }
 
-function StaffMappingSection({ corpId }: { corpId: string }) {
+function StaffMappingSection({ corpId, supabase }: { corpId: string, supabase: any }) {
   const [unmapped, setUnmapped] = useState<string[]>([]); const [mappings, setMappings] = useState<any[]>([])
-  
+
   const fetch = async () => {
     if (!corpId) return
     const { data: staff } = await supabase.from('flexible_kpis').select('staff_name').not('staff_name', 'eq', '').eq('corporation_id', corpId)

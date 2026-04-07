@@ -66,9 +66,9 @@ const KpiCard: React.FC<KpiCardProps> = ({
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-3xl font-black tracking-tighter text-slate-900 italic">
-              {unit === '円' ? formatValue(value / 10000) : formatValue(value)}
+              {formatValue(value)}
             </span>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unit === '円' ? '万円' : unit}</span>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unit}</span>
           </div>
         </div>
 
@@ -83,7 +83,7 @@ const KpiCard: React.FC<KpiCardProps> = ({
                 )}
             </div>
             <span className="text-sm font-black text-slate-700 italic">
-              {leftBottomValue !== null ? (unit === '円' ? formatValue(leftBottomValue / 10000) + '万' : formatValue(leftBottomValue)) : '-'}
+              {leftBottomValue !== null ? formatValue(leftBottomValue) : '-'}
             </span>
           </div>
           <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
@@ -111,7 +111,7 @@ const KpiCard: React.FC<KpiCardProps> = ({
               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(vsCompRatio || 0, 100)}%` }} />
             </div>
             <span className="text-xs font-bold text-slate-700">
-              {unit === '円' ? formatValue(compVal / 10000) + '万' : formatValue(compVal)}
+              {formatValue(compVal)}
             </span>
           </div>
         ) : (
@@ -133,7 +133,7 @@ const KpiCard: React.FC<KpiCardProps> = ({
             />
           </div>
           <span className="text-xs font-bold text-slate-700">
-            {unit === '円' ? formatValue(prevVal / 10000) + '万' : formatValue(prevVal)}
+            {formatValue(prevVal)}
           </span>
         </div>
       </div>

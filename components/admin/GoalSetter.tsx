@@ -91,16 +91,15 @@
 // }
 
 'use client'
-import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { useState, useEffect, useMemo } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
 
 export function GoalSetter({ corpId }: { corpId: string }) {
-  const targetKPIs = ["来院率", "メンテナンス率", "キャンセル率", "次回予約取得率", "離脱率", "当日キャンセル率", "チェア稼働率"];
+  const supabase = useMemo(() => createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), [])
+  const targetKPIs = ["来院率", "メンテナンス率", "キャンセル率", "次回予約取得率", "未予約率", "当日キャンセル率", "チェア稼働率"];
   
   const [goals, setGoals] = useState<Record<string, number>>({})
   const [editing, setEditing] = useState<Record<string, number>>({})

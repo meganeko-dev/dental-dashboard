@@ -57,7 +57,7 @@ const DASHBOARD_TABS = [
       { id: 'unreserved_count', label: '未予約数', unit: '名' },
       { id: 'unreserved_rate', label: '未予約率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
-      { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
+      { id: 'churn_patients_rate', label: '未予約率', unit: '%' },
       // { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
     ]
   }
@@ -222,16 +222,16 @@ export default function Dashboard() {
       const m = i + 1;
       const row = historyData.find(h => h.month === m) || null;
       return {
-        name: `${m}月`,
+        name: `${selectedYear}年${m}月`,
         売上: KpiEngine.calcFromSummarized(row, 'total_amount'),
         来院人数: KpiEngine.calcFromSummarized(row, 'patients_count'),
         次回予約取得率: KpiEngine.calcFromSummarized(row, 'next_reserve_rate'),
         キャンセル率: KpiEngine.calcFromSummarized(row, 'cancel_rate'),
         メンテナンス率: KpiEngine.calcFromSummarized(row, 'mente_rate'),
-        離脱率: KpiEngine.calcFromSummarized(row, 'churn_patients_rate'),
+        未予約率: KpiEngine.calcFromSummarized(row, 'churn_patients_rate'),
       };
     });
-  }, [historyData]);
+  }, [historyData, selectedYear]);
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -316,7 +316,7 @@ export default function Dashboard() {
               {activeTab === 'utilization' && (
                 <>
                   <Line yAxisId="left" type="linear" dataKey="メンテナンス率" stroke="#34a853" strokeWidth={3} dot={{r: 4, fill: '#34a853'}} />
-                  <Line yAxisId="right" type="linear" dataKey="離脱率" stroke="#fbbc04" strokeWidth={3} dot={{r: 4, fill: '#fbbc04'}} />
+                  <Line yAxisId="right" type="linear" dataKey="未予約率" stroke="#fbbc04" strokeWidth={3} dot={{r: 4, fill: '#fbbc04'}} />
                 </>
               )}
             </ComposedChart>
