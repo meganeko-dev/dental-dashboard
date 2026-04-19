@@ -10,6 +10,7 @@ import { GoalSetter } from '@/components/admin/GoalSetter'
 import { DataEditor } from '@/components/admin/DataEditor'
 import { MappingManager } from '@/components/admin/MappingManager'
 import { InsuranceRevenueSetter } from '@/components/admin/InsuranceRevenueSetter'
+import { StaffRevenueSetter } from '@/components/admin/StaffRevenueSetter'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -22,6 +23,7 @@ export default function AdminPage() {
   )
 
   const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'insurance'>('upload')
+  const [insuranceTab, setInsuranceTab] = useState<'clinic' | 'staff'>('clinic')
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -35,6 +37,9 @@ export default function AdminPage() {
 
   // マッピング機能は新心会(TN32FBH8)のみ表示
   const showMapping = corpId === 'TN32FBH8'
+  // スタッフ売上入力タブ・売上テーブルビューは藤美会(FWLRNER6)のみ表示
+  const showStaffRevenueTab = corpId === 'FWLRNER6'
+  const showTableView       = corpId === 'FWLRNER6'
 
   return (
     <div className="flex min-h-screen bg-gray-100 text-slate-800 font-sans">
@@ -60,6 +65,9 @@ export default function AdminPage() {
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{activeMenu} Mode</h2>
             <div className="flex gap-3 items-center">
+              {showTableView && (
+                <Link href="/table_view" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📊 Table</Link>
+              )}
               <Link href="/" prefetch={false} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg">📊 画面を確認</Link>
               <button 
                 onClick={handleLogout}
@@ -73,7 +81,38 @@ export default function AdminPage() {
           {/* corpId と mode を各コンポーネントに渡す */}
           {activeMenu === 'upload' && <DataUpload corpId={corpId} />}
           {activeMenu === 'goals' && <GoalSetter corpId={corpId} />}
-          {activeMenu === 'insurance' && <InsuranceRevenueSetter corpId={corpId} mode={mode} />}
+          {activeMenu === 'insurance' && (
+            showStaffRevenueTab ? (
+              <div className="space-y-6">
+                <div className="flex gap-2 border-b border-slate-200">
+                  <button
+                    onClick={() => setInsuranceTab('clinic')}
+                    className={`px-6 py-3 text-sm font-black transition-all cursor-pointer border-b-2 ${
+                      insuranceTab === 'clinic'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    クリニック全体
+                  </button>
+                  <button
+                    onClick={() => setInsuranceTab('staff')}
+                    className={`px-6 py-3 text-sm font-black transition-all cursor-pointer border-b-2 ${
+                      insuranceTab === 'staff'
+                        ? 'border-blue-600 text-blue-600'
+                        : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    スタッフ
+                  </button>
+                </div>
+                {insuranceTab === 'clinic' && <InsuranceRevenueSetter corpId={corpId} mode={mode} />}
+                {insuranceTab === 'staff' && <StaffRevenueSetter corpId={corpId} mode={mode} />}
+              </div>
+            ) : (
+              <InsuranceRevenueSetter corpId={corpId} mode={mode} />
+            )
+          )}
           {activeMenu === 'edit' && <DataEditor corpId={corpId} mode={mode} />}
           
           {/* コンテンツ側でもガードをかける */}

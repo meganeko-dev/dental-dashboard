@@ -182,7 +182,7 @@ function ClinicMappingSection({ corpId, supabase }: { corpId: string, supabase: 
   return (
     <div className="space-y-4 animate-in fade-in">
       <div className="bg-white p-6 rounded-2xl border shadow-sm flex gap-4 items-end">
-        <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase block mb-1">レセコン登録名</label><input value={key} onChange={e => setKey(e.target.value)} className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="東京" /></div>
+        <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase block mb-1">登録名</label><input value={key} onChange={e => setKey(e.target.value)} className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="東京" /></div>
         <div className="flex-1"><label className="text-[10px] font-black text-slate-400 uppercase block mb-1">正式名称</label><input value={val} onChange={e => setVal(e.target.value)} className="w-full border rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="東京歯科" /></div>
         <button onClick={add} className="bg-slate-800 text-white px-8 py-2.5 rounded-lg font-bold hover:bg-black cursor-pointer">追加</button>
       </div>

@@ -1,10 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
 import Papa from 'papaparse'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 // 💡 半角カタカナを全角に変換する補助関数
 const toFullWidthKatakana = (str: string): string => {
@@ -40,6 +34,35 @@ const cleanName = (name: string): string => {
   if (!name) return '';
   const parts = name.split('_');
   return parts.length > 1 ? parts[1].trim() : name.trim();
+};
+
+const parseSheetNumber = (value: string | number | null | undefined): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = String(value).replace(/,/g, '').trim();
+  if (normalized === '') return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseSheetYearMonth = (value: string | null | undefined): { year: number; month: number } | null => {
+  const normalized = String(value ?? '').trim();
+  const slashMatch = normalized.match(/^(\d{4})[\/\-](\d{1,2})/);
+  if (slashMatch) return { year: Number(slashMatch[1]), month: Number(slashMatch[2]) };
+
+  const japaneseMatch = normalized.match(/^(\d{4})年\s*(\d{1,2})月/);
+  if (japaneseMatch) return { year: Number(japaneseMatch[1]), month: Number(japaneseMatch[2]) };
+
+  const compactMatch = normalized.match(/^(\d{4})(\d{2})$/);
+  if (compactMatch) return { year: Number(compactMatch[1]), month: Number(compactMatch[2]) };
+
+  return null;
+};
+
+const monthFirstDate = (year: number, month: number): string =>
+  `${year}-${String(month).padStart(2, '0')}-01`;
+
+const getClinicNameFromMap = (clinicIdToName: Map<string, string>, clinicId: string): string | null => {
+  return clinicIdToName.get(clinicId) ?? clinicIdToName.get(String(Number(clinicId))) ?? null;
 };
 
 export const DataImporter = {
@@ -112,15 +135,6 @@ export const DataImporter = {
     return Array.from(seen.values());
   },
 
-  saveToDb: async (data: any[]) => {
-    const chunkSize = 500
-    for (let i = 0; i < data.length; i += chunkSize) {
-      const chunk = data.slice(i, i + chunkSize)
-      const { error } = await supabase.from('flexible_kpis').insert(chunk)
-      if (error) throw error
-    }
-  },
-
   parseCSVAsArray: (file: File): Promise<string[][]> => {
     return new Promise((resolve, reject) => {
       Papa.parse(file, {
@@ -144,6 +158,124 @@ export const DataImporter = {
     })
   },
 
+  // Google Sheets由来CSV: シート「メンテナンス」
+  // A列: 医院ID / B列: 医院名 / C列: 項目 / D列以降: 年月別の値
+  transformSheetMaintenance: (
+    data: string[][],
+    corpId: string,
+    clinicIdToName: Map<string, string>
+  ): any[] => {
+    if (data.length < 2) return [];
+
+    const headers = data[0];
+    const ymCols = headers.slice(3).map(parseSheetYearMonth);
+    const results: any[] = [];
+    const kpiMap: Record<string, string> = {
+      'メンテ': 'メンテナンス数',
+      '予約数': '予約人数_既存患者',
+      '来院数': '来院数',
+    };
+
+    for (const row of data.slice(1)) {
+      const clinicId = String(row[0] ?? '').trim();
+      if (!clinicId) continue;
+
+      const sourceItem = String(row[2] ?? '').trim();
+      const kpiName = kpiMap[sourceItem];
+      if (!kpiName) continue;
+
+      const clinicName = getClinicNameFromMap(clinicIdToName, clinicId);
+      if (!clinicName) continue;
+
+      for (let i = 0; i < ymCols.length; i++) {
+        const ym = ymCols[i];
+        if (!ym) continue;
+
+        const value = parseSheetNumber(row[i + 3]);
+        if (value === null) continue;
+
+        results.push({
+          corporation_id: corpId,
+          clinic_id: clinicId,
+          clinic_name: clinicName,
+          staff_name: '',
+          year: ym.year,
+          month: ym.month,
+          date: monthFirstDate(ym.year, ym.month),
+          segment: 'clinic',
+          kpi_name: kpiName,
+          value,
+          is_target: false,
+          treatment_type: '',
+          staff_role: '',
+        });
+      }
+    }
+
+    return results;
+  },
+
+  // Google Sheets由来CSV: シート「離脱」
+  // A列: 医院ID / B列: 医院名 / C列: 項目 / D列: ステータス / E列以降: 年月別の値
+  transformSheetChurn: (
+    data: string[][],
+    corpId: string,
+    clinicIdToName: Map<string, string>
+  ): any[] => {
+    if (data.length < 2) return [];
+
+    const headers = data[0];
+    const ymCols = headers.slice(4).map(parseSheetYearMonth);
+    const results: any[] = [];
+    const getKpiName = (category: string, status: string): string | null => {
+      if (category === '患者数' && status === '') return '患者数';
+      if (category === 'メンテ' && status === '離脱数') return 'メンテナンス_離脱数';
+      if (category === 'メンテ' && status === '未予約数') return 'メンテナンス_未予約数';
+      if (category === '治療' && status === '離脱数') return '治療_離脱数';
+      if (category === '治療' && status === '未予約数') return '治療_未予約数';
+      return null;
+    };
+
+    for (const row of data.slice(1)) {
+      const clinicId = String(row[0] ?? '').trim();
+      if (!clinicId) continue;
+
+      const category = String(row[2] ?? '').trim();
+      const status = String(row[3] ?? '').trim();
+      const kpiName = getKpiName(category, status);
+      if (!kpiName) continue;
+
+      const clinicName = getClinicNameFromMap(clinicIdToName, clinicId);
+      if (!clinicName) continue;
+
+      for (let i = 0; i < ymCols.length; i++) {
+        const ym = ymCols[i];
+        if (!ym) continue;
+
+        const value = parseSheetNumber(row[i + 4]);
+        if (value === null) continue;
+
+        results.push({
+          corporation_id: corpId,
+          clinic_id: clinicId,
+          clinic_name: clinicName,
+          staff_name: '',
+          year: ym.year,
+          month: ym.month,
+          date: monthFirstDate(ym.year, ym.month),
+          segment: 'clinic',
+          kpi_name: kpiName,
+          value,
+          is_target: false,
+          treatment_type: '',
+          staff_role: '',
+        });
+      }
+    }
+
+    return results;
+  },
+
   transformStats: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     const headers = data[0];
     const results: any[] = [];
@@ -155,9 +287,10 @@ export const DataImporter = {
       '来院患者数':     { kpi_name: '来院患者数',        multiply100: false },
       '継続患者':       { kpi_name: '来院人数_既存患者', multiply100: false },
       '新患数':         { kpi_name: '来院人数_新規患者', multiply100: false },
+      '初回メンテ移行数': { kpi_name: '初回メンテ移行数', multiply100: false },
       '当日キャンセル数': { kpi_name: '当日キャンセル数',  multiply100: false },
       '離脱患者':       { kpi_name: '離脱患者',          multiply100: false },
-      '離脱率':         { kpi_name: '離脱率',            multiply100: true  },
+      '離脱率':         { kpi_name: '離脱率',            multiply100: false },
       'ユニット稼働率': { kpi_name: 'チェア稼働率',       multiply100: true  },
     };
 
@@ -422,6 +555,124 @@ export const DataImporter = {
         { kpi_name: '雑収入_人数',       value: n(zasshuPaxIdx) },
         { kpi_name: '稼働日数',          value: n(kodoDaysIdx) },
       ].forEach(kpi => results.push({ ...common, ...kpi }));
+    }
+    return results;
+  },
+
+  // FWLRNER6専用: 日計表（患者№順）= 担当者別日別売上（患者単位の明細行を集計）
+  // 保険種別 → kpi_name マッピング:
+  //   '雑収' → 物販_金額
+  //   '自費' → 自費治療_金額
+  //   その他 → 保険治療_金額
+  // value = 現金入金額 + カード入金額
+  // 医師氏名（姓/名）が空白の行はスキップ（出金行等）
+  transformFujimikaiStaffDaily: (
+    data: string[][],
+    clinicName: string,
+    corpId: string,
+    clinicId: string
+  ): any[] => {
+    if (data.length < 2) return [];
+    const headers = data[0].map(h => h?.trim() ?? '');
+    const idx = (name: string) => headers.indexOf(name);
+
+    const dateIdx      = idx('日付');
+    const hokenIdx     = idx('保険種別');
+    const lastNameIdx  = idx('医師氏名（姓）');
+    const firstNameIdx = idx('医師氏名（名）');
+    const cashIdx      = idx('現金入金額');
+    const cardIdx      = idx('カード入金額');
+
+    if (dateIdx === -1 || hokenIdx === -1 || lastNameIdx === -1) return [];
+
+    const n = (row: string[], colIdx: number): number => {
+      if (colIdx === -1) return 0;
+      const v = parseFloat(String(row[colIdx] ?? '').replace(/,/g, ''));
+      return isNaN(v) ? 0 : v;
+    };
+
+    // 姓 + 名 を氏名に正規化（全角空白→半角、連続空白→単一）
+    const normalizeStaffName = (last: string, first: string): string | null => {
+      const combined = `${last ?? ''} ${first ?? ''}`
+        .replace(/\u3000/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!combined) return null;
+      const parts = combined.split(' ').filter(Boolean);
+      if (parts.length !== 2) return null; // 姓のみ/名のみ/3分割以上は不正
+      return parts.join(' ');
+    };
+
+    // 日付正規化: "2026/ 2/ 2" のような空白入りにも対応
+    const parseDate = (raw: string): { year: number; month: number; date: string } | null => {
+      if (!raw) return null;
+      const cleaned = raw.replace(/\s+/g, '');
+      const m = cleaned.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+      if (!m) return null;
+      const year  = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10);
+      const day   = parseInt(m[3], 10);
+      if (!year || !month || !day) return null;
+      const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      return { year, month, date };
+    };
+
+    // 集計マップ: key = date|staffName|kpiName
+    const agg = new Map<string, {
+      date: string; year: number; month: number;
+      staffName: string; kpiName: string; value: number;
+    }>();
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const dateParsed = parseDate(row[dateIdx]?.trim() ?? '');
+      if (!dateParsed) continue;
+
+      const staffName = normalizeStaffName(
+        row[lastNameIdx] ?? '',
+        firstNameIdx !== -1 ? (row[firstNameIdx] ?? '') : ''
+      );
+      if (!staffName) continue;
+
+      const hoken = (row[hokenIdx] ?? '').trim();
+      const kpiName =
+        hoken === '雑収' ? '物販_金額' :
+        hoken === '自費' ? '自費治療_金額' :
+        '保険治療_金額';
+
+      const value = n(row, cashIdx) + n(row, cardIdx);
+
+      const key = `${dateParsed.date}|${staffName}|${kpiName}`;
+      const existing = agg.get(key);
+      if (existing) {
+        existing.value += value;
+      } else {
+        agg.set(key, {
+          date:  dateParsed.date,
+          year:  dateParsed.year,
+          month: dateParsed.month,
+          staffName, kpiName, value,
+        });
+      }
+    }
+
+    const results: any[] = [];
+    for (const r of agg.values()) {
+      results.push({
+        corporation_id: corpId,
+        clinic_id:      clinicId,
+        clinic_name:    clinicName,
+        staff_name:     r.staffName,
+        year:           r.year,
+        month:          r.month,
+        date:           r.date,
+        segment:        'staff',
+        kpi_name:       r.kpiName,
+        value:          r.value,
+        is_target:      false,
+        treatment_type: '',
+        staff_role:     '',
+      });
     }
     return results;
   },

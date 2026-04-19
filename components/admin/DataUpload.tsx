@@ -235,15 +235,22 @@ export function DataUpload({ corpId }: { corpId: string }) {
 
         try {
           const fileName = file.name.normalize('NFC');
+          const fileBaseName = fileName.replace(/\.[^.]+$/, '').trim();
+          const sheetImportMatch = fileBaseName.match(/^([^_]+)_(メンテナンス|離脱)(?:\s*\(\d+\))?$/);
           const nameParts = fileName.split("_");
           let clinicId = "";
           let filePattern = "";
+          let sheetCorpId = "";
 
           // 年プレフィックス (2025_, 2026_ 等) を除去してから先頭の数字列を clinicId として取得
           const rawPart = nameParts[0].length === 4 && !isNaN(Number(nameParts[0])) ? nameParts[1] : nameParts[0];
           clinicId = rawPart.match(/^\d+/)?.[0] ?? rawPart;
 
-          if (fileName.includes("月ごとのStats")) {
+          if (sheetImportMatch) {
+            sheetCorpId = sheetImportMatch[1];
+            filePattern = sheetImportMatch[2] === 'メンテナンス' ? 'sheet_maintenance' : 'sheet_churn';
+            clinicId = "(CSV内の医院IDより取得)";
+          } else if (fileName.includes("月ごとのStats")) {
             filePattern = "stats";
           } else if (fileName.includes("医院状況")) {
             filePattern = "status";
@@ -255,6 +262,9 @@ export function DataUpload({ corpId }: { corpId: string }) {
           } else if (fileName.includes("月計表") && fileName.includes("総括")) {
             filePattern = "sales_staff";
             clinicId = "(CSVより取得)";
+          } else if (fileName.includes("日計表") && fileName.includes("患者")) {
+            filePattern = "sales_staff_daily";
+            clinicId = "(CSVより取得)";
           } else if (fileName.includes("新心会") && fileName.includes("レセプト数")) {
             filePattern = "shinsinkai_recept";
             clinicId = "(CSVより取得)";
@@ -265,15 +275,61 @@ export function DataUpload({ corpId }: { corpId: string }) {
             filePattern = "shinsinkai_private";
             clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
 
+          // ── Google Sheets由来CSV: メンテナンス / 離脱 ─────────────────────
+          if (filePattern === 'sheet_maintenance' || filePattern === 'sheet_churn') {
+            if (!sheetCorpId) {
+              throw new Error('ファイル名から法人IDを取得できませんでした。例: FWLRNER6_メンテナンス.csv');
+            }
+            if (profile?.corporation_id !== sheetCorpId) {
+              throw new Error(`権限エラー: ファイル名の法人ID(${sheetCorpId})は、現在の通信アカウント(${profile?.corporation_id})と一致しません。`);
+            }
+
+            const rawData = await DataImporter.parseCSVAsArray(file);
+            if (rawData.length < 2) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');
+
+            const { data: clinicRows, error: clinicRowsError } = await supabase
+              .from('clinics')
+              .select('id, name')
+              .eq('corporation_id', sheetCorpId);
+
+            if (clinicRowsError) {
+              addLog(`[DBエラー詳細] Clinics取得失敗: ${clinicRowsError.message} (Code: ${clinicRowsError.code})`);
+              throw new Error(`法人ID ${sheetCorpId} のクリニック一覧を取得できませんでした。`);
+            }
+
+            const clinicIdToName = new Map<string, string>(
+              (clinicRows ?? []).map(c => [String(c.id), c.name])
+            );
+
+            const transformed = filePattern === 'sheet_maintenance'
+              ? DataImporter.transformSheetMaintenance(rawData, sheetCorpId, clinicIdToName)
+              : DataImporter.transformSheetChurn(rawData, sheetCorpId, clinicIdToName);
+
+            addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
+
+            const chunkSize = 100;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
+                onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
+              });
+              if (insertError) {
+                addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
+                throw new Error(`保存エラー: ${insertError.message}`);
+              }
+            }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
           // ── FWLRNER6専用: 月計表ファイル処理 ──────────────────────────────
-          if (filePattern === 'sales_clinic' || filePattern === 'sales_staff') {
+          } else if (filePattern === 'sales_clinic' || filePattern === 'sales_staff' || filePattern === 'sales_staff_daily') {
             if (profile?.corporation_id !== 'FWLRNER6') {
-              throw new Error('このファイル形式（月計表）は対応していない法人アカウントです。');
+              throw new Error('このファイル形式（月計表/日計表）は対応していない法人アカウントです。');
             }
 
             const rawData = await DataImporter.parseCSVAsArraySJIS(file);
@@ -303,7 +359,9 @@ export function DataUpload({ corpId }: { corpId: string }) {
 
             const transformed = filePattern === 'sales_clinic'
               ? DataImporter.transformSalesClinic(rawData, salesClinicName, salesCorpId, salesClinicId)
-              : DataImporter.transformSalesStaff(rawData, salesClinicName, salesCorpId, salesClinicId);
+              : filePattern === 'sales_staff'
+              ? DataImporter.transformSalesStaff(rawData, salesClinicName, salesCorpId, salesClinicId)
+              : DataImporter.transformFujimikaiStaffDaily(rawData, salesClinicName, salesCorpId, salesClinicId);
 
             addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
 
@@ -438,7 +496,7 @@ export function DataUpload({ corpId }: { corpId: string }) {
             <p className="font-bold mb-1">複数ファイルの一括アップロード機能:</p>
             <ul className="list-disc list-inside space-y-1">
               <li>PC上で複数のファイルを選択（ShiftキーやCtrlキーを使用）するか、ドラッグ＆ドロップで一気に処理できます。</li>
-              <li>「月ごとのStats」「医院状況」「ステージ日別状況」が混ざっていても自動で判別します。</li>
+              <li>「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「ステージ日別状況」が混ざっていても自動で判別します。</li>
               <li>途中で1つのファイルがエラーになっても、他のファイルはそのまま処理が続行されます。</li>
             </ul>
           </div>

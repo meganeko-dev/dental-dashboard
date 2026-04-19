@@ -208,14 +208,9 @@
 // }
 
 'use client'
-import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { useState, useEffect, useMemo } from 'react'
+import { createBrowserClient } from '@supabase/ssr'
 import { KPI_NAMES } from '@/lib/kpi-engine'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 interface DataEditorProps {
   corpId: string;
@@ -223,6 +218,11 @@ interface DataEditorProps {
 }
 
 export function DataEditor({ corpId, mode }: DataEditorProps) {
+  const supabase = useMemo(() => createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ), [])
+
   const [tab, setTab] = useState<'clinic' | 'person'>('clinic')
   const [clinics, setClinics] = useState<string[]>([])
   const [allStaffData, setAllStaffData] = useState<{clinic_name: string, staff_name: string}[]>([])
@@ -264,7 +264,7 @@ export function DataEditor({ corpId, mode }: DataEditorProps) {
       if (sData) setAllStaffData(sData)
     }
     fetchMasters()
-  }, [corpId, mode])
+  }, [corpId, mode, supabase])
   
   // 2. スタッフリストのフィルタリング
   useEffect(() => {
@@ -296,11 +296,17 @@ export function DataEditor({ corpId, mode }: DataEditorProps) {
 
     if (tab === 'person' && filter.staff) query = query.eq('staff_name', filter.staff);
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) {
+      console.error('[DataEditor] search error:', error);
+      alert(`データ取得に失敗しました: ${error.message}`);
+      setLoading(false);
+      return;
+    }
     const grid: Record<string, Record<number, any>> = {};
     KPI_NAMES.forEach(name => { grid[name] = {} });
     data?.forEach(item => { if (grid[item.kpi_name]) grid[item.kpi_name][item.month] = item; });
-    
+
     setDataGrid(grid);
     setHasSearched(true);
     setLoading(false);
@@ -310,7 +316,12 @@ export function DataEditor({ corpId, mode }: DataEditorProps) {
     const row = dataGrid[kpiName];
     const updates = Object.values(row).filter(item => item.id);
     for (const item of updates) {
-      await supabase.from('flexible_kpis').update({ value: item.value }).eq('id', item.id);
+      const { error } = await supabase.from('flexible_kpis').update({ value: item.value }).eq('id', item.id);
+      if (error) {
+        console.error('[DataEditor] saveRow error:', error);
+        alert(`保存に失敗しました: ${error.message}`);
+        return;
+      }
     }
     setEditingKey(null);
     alert(`${kpiName} を保存しました`);

@@ -8,6 +8,32 @@ import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext'
 
+const RATE_KEYS = new Set([
+  '次回予約取得率',
+  'キャンセル率',
+  'メンテナンス率',
+  '未予約率',
+  '離脱率',
+])
+
+const formatChartTooltipValue = (value: number, name: string) => {
+  const formatted = Number(value).toLocaleString('ja-JP', { maximumFractionDigits: 2 })
+  return RATE_KEYS.has(name) ? `${formatted}%` : formatted
+}
+
+const getCurrentJstPeriod = () => {
+  const parts = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(new Date())
+
+  return {
+    year: Number(parts.find(part => part.type === 'year')?.value),
+    month: Number(parts.find(part => part.type === 'month')?.value),
+  }
+}
+
 const DASHBOARD_TABS = [
   {
     id: 'profitability',
@@ -64,6 +90,7 @@ const DASHBOARD_TABS = [
 export default function StaffDashboard() {
   const router = useRouter()
   const { corpId, mode, loading: authLoading } = useAuth()
+  const currentPeriod = useMemo(() => getCurrentJstPeriod(), [])
 
   const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,8 +101,8 @@ export default function StaffDashboard() {
   const [targetStaff, setTargetStaff] = useState('')
   const [compareStaff, setCompareStaff] = useState('')
   const [availablePeriods, setAvailablePeriods] = useState<{year: number, month: number}[]>([])
-  const [selectedYear, setSelectedYear] = useState(2025)
-  const [selectedMonth, setSelectedMonth] = useState(6)
+  const [selectedYear, setSelectedYear] = useState(currentPeriod.year)
+  const [selectedMonth, setSelectedMonth] = useState(currentPeriod.month)
   const [activeTab, setActiveTab] = useState('profitability')
 
   const [goals, setGoals] = useState<Record<string, number>>({})
@@ -101,9 +128,19 @@ export default function StaffDashboard() {
         .select('staff_name, clinic_name')
         .eq('corporation_id', corpId)
 
+      const { data: clinicData } = await supabase
+        .from('clinics')
+        .select('id, name')
+        .eq('corporation_id', corpId)
+        .order('id', { ascending: true })
+
       if (data) {
+        const clinicOrder = new Map((clinicData ?? []).map((clinic, index) => [clinic.name, index]))
         const sortedData = [...data].sort((a, b) => {
           if (a.clinic_name !== b.clinic_name) {
+            const aOrder = clinicOrder.get(a.clinic_name) ?? Number.MAX_SAFE_INTEGER
+            const bOrder = clinicOrder.get(b.clinic_name) ?? Number.MAX_SAFE_INTEGER
+            if (aOrder !== bOrder) return aOrder - bOrder
             return a.clinic_name.localeCompare(b.clinic_name, 'ja');
           }
           return a.staff_name.localeCompare(b.staff_name, 'ja');
@@ -147,9 +184,6 @@ export default function StaffDashboard() {
           periodData.map(d => [`${d.year}-${d.month}`, { year: Number(d.year), month: Number(d.month) }])
         ).values()].sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
         setAvailablePeriods(periods)
-        const latest = periods[periods.length - 1]
-        setSelectedYear(latest.year)
-        setSelectedMonth(latest.month)
       }
 
       setLoading(false)
@@ -188,13 +222,16 @@ export default function StaffDashboard() {
   }, [targetStaff, compareStaff, selectedYear, selectedMonth, corpId, supabase, staffOptions]);
 
   const availableYears = useMemo(() =>
-    [...new Set(availablePeriods.map(p => p.year))].sort((a, b) => a - b),
-    [availablePeriods]
+    [...new Set([...availablePeriods.map(p => p.year), selectedYear])].sort((a, b) => a - b),
+    [availablePeriods, selectedYear]
   )
 
   const availableMonths = useMemo(() =>
-    availablePeriods.filter(p => p.year === selectedYear).map(p => p.month).sort((a, b) => a - b),
-    [availablePeriods, selectedYear]
+    [...new Set([
+      ...availablePeriods.filter(p => p.year === selectedYear).map(p => p.month),
+      selectedMonth,
+    ])].sort((a, b) => a - b),
+    [availablePeriods, selectedYear, selectedMonth]
   )
 
   const handleYearChange = (year: number) => {
@@ -244,6 +281,9 @@ export default function StaffDashboard() {
             </div>
             <div className="flex flex-col gap-2">
               <Link href="/" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Clinic View 🏥</Link>
+              {corpId === 'FWLRNER6' && (
+                <Link href="/table_view" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Table View 📊</Link>
+              )}
               <Link href="/admin" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</Link>
             </div>
           </div>
@@ -273,7 +313,10 @@ export default function StaffDashboard() {
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fontWeight: 'bold', fill: '#94a3b8'}} />
                 <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
-                <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} />
+                <Tooltip
+                  contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                  formatter={(value: number, name: string) => formatChartTooltipValue(value, name)}
+                />
                 <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 
                 {activeTab === 'profitability' && (

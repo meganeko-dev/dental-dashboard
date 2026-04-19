@@ -16,8 +16,8 @@ const PATIENT_BREAKDOWN_KPIS = [
 const REVENUE_KPIS = ['保険治療', '自費治療'];
 
 // 💡 新形式売上KPI (FWLRNER6 月計表CSV)
-const INSURANCE_KPIS  = ['社会保険_金額', '国民健康保険_金額'];
-const PRIVATE_KPIS    = ['自費治療_金額', '雑収入_金額'];
+const INSURANCE_KPIS  = ['社会保険_金額', '国民健康保険_金額', '保険治療_金額'];
+const PRIVATE_KPIS    = ['自費治療_金額', '雑収入_金額', '物販_金額'];
 const SALES_REVENUE_KPIS = [...INSURANCE_KPIS, ...PRIVATE_KPIS];
 
 export const KpiEngine = {
