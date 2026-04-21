@@ -21,6 +21,40 @@ const formatChartTooltipValue = (value: number, name: string) => {
   return RATE_KEYS.has(name) ? `${formatted}%` : formatted
 }
 
+const toPercentValue = (value: number) => {
+  if (!Number.isFinite(value)) return 0
+  return Math.abs(value) <= 1 ? value * 100 : value
+}
+
+const calcStaffReservedRate = (rows: any[]) => {
+  const value = rows
+    .filter(row => row.segment === 'staff' && row.kpi_name === '予約率')
+    .reduce((sum, row) => sum + (Number(row.value) || 0), 0)
+
+  return toPercentValue(value)
+}
+
+const calcStaffCardValue = (summaryRow: any, rawRows: any[], kpiId: string) =>
+  kpiId === 'reserved_rate'
+    ? calcStaffReservedRate(rawRows)
+    : KpiEngine.calcFromSummarizedStaff(summaryRow, kpiId)
+
+const calculateStaffForecast = (summaryRows: any[], rawRows: any[], kpiId: string, currentYear: number, currentMonth: number) => {
+  if (kpiId !== 'reserved_rate') {
+    return KpiEngine.calculateForecastFromSummarizedStaff(summaryRows, kpiId, currentYear, currentMonth)
+  }
+
+  const monthlyRows = Array.from({ length: 12 }, (_, index) => {
+    const month = index + 1
+    const rows = rawRows.filter(row => Number(row.month) === month)
+    return { year: currentYear, month, value: calcStaffReservedRate(rows) }
+  })
+  const past = monthlyRows.filter(row => row.year < currentYear || (row.year === currentYear && row.month < currentMonth))
+  const values = past.filter(row => row.value > 0).slice(-3)
+  if (values.length === 0) return null
+  return values.reduce((sum, row) => sum + row.value, 0) / values.length
+}
+
 const getCurrentJstPeriod = () => {
   const parts = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
@@ -111,6 +145,11 @@ export default function StaffDashboard() {
   const [prevData, setPrevData] = useState<any[]>([])
   const [lastYearData, setLastYearData] = useState<any[]>([])
   const [historyData, setHistoryData] = useState<any[]>([])
+  const [targetRawData, setTargetRawData] = useState<any[]>([])
+  const [compRawData, setCompRawData] = useState<any[]>([])
+  const [prevRawData, setPrevRawData] = useState<any[]>([])
+  const [lastYearRawData, setLastYearRawData] = useState<any[]>([])
+  const [historyRawData, setHistoryRawData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   const handleLogout = async () => {
@@ -202,13 +241,31 @@ export default function StaffDashboard() {
       const targetClinic = staffOptions.find(s => s.value === targetStaff)?.clinic || '';
       const compareClinic = staffOptions.find(s => s.value === compareStaff)?.clinic || '';
 
-      // summarized_staff_kpi から取得（月1行のみ → 上限問題なし）
-      const [targetRes, compRes, prevRes, lastYearRes, historyRes] = await Promise.all([
+      const rawSelect = 'year, month, segment, staff_name, clinic_name, kpi_name, value'
+
+      // summarized_staff_kpi は既存カード用、flexible_kpis は予約率カード用
+      const [
+        targetRes,
+        compRes,
+        prevRes,
+        lastYearRes,
+        historyRes,
+        targetRawRes,
+        compRawRes,
+        prevRawRes,
+        lastYearRawRes,
+        historyRawRes,
+      ] = await Promise.all([
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear).eq('month', selectedMonth),
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', prevYear).eq('month', prevMonth),
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear - 1).eq('month', selectedMonth),
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true })
+        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true }),
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).eq('kpi_name', '予約率'),
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('clinic_name', compareClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).eq('kpi_name', '予約率'),
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', prevYear).eq('month', prevMonth).eq('kpi_name', '予約率'),
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear - 1).eq('month', selectedMonth).eq('kpi_name', '予約率'),
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('kpi_name', '予約率')
       ]);
 
       setTargetData(targetRes.data || []);
@@ -216,6 +273,11 @@ export default function StaffDashboard() {
       setPrevData(prevRes.data || []);
       setLastYearData(lastYearRes.data || []);
       setHistoryData(historyRes.data || []);
+      setTargetRawData(targetRawRes.data || []);
+      setCompRawData(compRawRes.data || []);
+      setPrevRawData(prevRawRes.data || []);
+      setLastYearRawData(lastYearRawRes.data || []);
+      setHistoryRawData(historyRawRes.data || []);
       setLoading(false);
     };
     fetchData();
@@ -355,10 +417,10 @@ export default function StaffDashboard() {
             const lastYearRow = lastYearData[0]  || null;
             const compRow     = compData[0]      || null;
 
-            const val           = KpiEngine.calcFromSummarizedStaff(targetRow,   kpi.id);
-            const prevVal       = KpiEngine.calcFromSummarizedStaff(prevRow,     kpi.id);
-            const lastYearVal   = KpiEngine.calcFromSummarizedStaff(lastYearRow, kpi.id);
-            const compStaffVal  = KpiEngine.calcFromSummarizedStaff(compRow,     kpi.id);
+            const val           = calcStaffCardValue(targetRow,   targetRawData,   kpi.id);
+            const prevVal       = calcStaffCardValue(prevRow,     prevRawData,     kpi.id);
+            const lastYearVal   = calcStaffCardValue(lastYearRow, lastYearRawData, kpi.id);
+            const compStaffVal  = calcStaffCardValue(compRow,     compRawData,     kpi.id);
             const goal          = goals[kpi.label] || 0;
 
             const finalCompVal   = mode === 'single' ? lastYearVal : compStaffVal;
@@ -366,7 +428,7 @@ export default function StaffDashboard() {
 
             const mom         = KpiEngine.calcRatio(val, prevVal);
             const achievement = KpiEngine.calcRatio(val, goal);
-            const forecast    = KpiEngine.calculateForecastFromSummarizedStaff(historyData, kpi.id, selectedYear, selectedMonth);
+            const forecast    = calculateStaffForecast(historyData, historyRawData, kpi.id, selectedYear, selectedMonth);
 
             return (
               <KpiCard

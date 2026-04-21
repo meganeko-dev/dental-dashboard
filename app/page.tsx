@@ -76,6 +76,7 @@ const CLINIC_RAW_KPIS = [
   '治療_離脱数',
   '患者数',
   'メンテナンス_未予約数',
+  '予約率',
 ]
 
 const RAW_CLINIC_KPI_IDS = new Set([
@@ -89,6 +90,7 @@ const RAW_CLINIC_KPI_IDS = new Set([
   'churn_patients_rate',
   'maintenance_churn_count',
   'maintenance_churn_rate',
+  'reserved_rate',
 ])
 
 const RATE_KEYS = new Set([
@@ -141,6 +143,8 @@ const calcClinicRawKpi = (rows: any[], kpiId: string) => {
       const maintenanceUnreserved = sumRawKpi(rows, 'メンテナンス_未予約数')
       return patientCount > 0 ? ((maintenanceChurn + maintenanceUnreserved) / patientCount) * 100 : 0
     }
+    case 'reserved_rate':
+      return toPercentValue(sumRawKpi(rows, '予約率'))
     default:
       return 0
   }

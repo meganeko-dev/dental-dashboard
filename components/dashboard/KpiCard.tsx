@@ -52,6 +52,8 @@ const KpiCard: React.FC<KpiCardProps> = ({
       'avg_price_per_day',
       'insurance_avg_price_per_day',
       'private_avg_price_per_day',
+      'recept_price',
+      'avg_price',
     ];
     const maximumFractionDigits = kpiId && integerKpis.includes(kpiId) ? 0 : 2;
     return num.toLocaleString('ja-JP', { maximumFractionDigits });
