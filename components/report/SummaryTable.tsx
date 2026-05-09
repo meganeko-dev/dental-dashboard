@@ -46,7 +46,7 @@ type Props = {
 
 export default function SummaryTable({ rows, rangeLabel }: Props) {
   return (
-    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b border-slate-200 flex items-baseline gap-4">
         <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest">サマリー</h3>
         <span className="text-xs font-bold text-slate-400">{rangeLabel}</span>

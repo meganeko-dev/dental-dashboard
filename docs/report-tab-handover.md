@@ -14,7 +14,7 @@
 | # | ブロック | 形式 | コンポーネント | データソース |
 |---|---|---|---|---|
 | 1 | サマリー表 | 10行 × 24列（KPI×月） | `components/report/SummaryTable.tsx` | `summarized_clinic_kpi` ＋ `flexible_kpis` |
-| 2 | メンテナンス推移 | 積み上げ棒（実数ラベル付） | `components/report/MonthlyTrendChart.tsx` | `flexible_kpis`「来院人数_ステージ内訳_*」 + `data_mappings(maintenance)`（2026-05-09 切替） |
+| 2 | メンテナンス推移 | 積み上げ棒（実数ラベル付） | `components/report/MonthlyTrendChart.tsx` | `flexible_kpis`「来院人数_ステージ内訳_*」(メンテ数) + 「来院人数_ステージ内訳用」(来院合計) + `data_mappings(maintenance)`（2026-05-09 切替 / 2026-05-09 メンテ以外計算改定） |
 | 3 | 男女比 | ドーナツ（%表示） | `components/report/GenderRatioChart.tsx` | `patient_snapshots.gender` |
 | 4 | 年齢構成 | 横棒（9区分） | `components/report/AgeDistributionChart.tsx` | `patient_snapshots.age` |
 | 5 | アプリ登録者数 | 積み上げ棒（実数ラベル付） | `MonthlyTrendChart.tsx` | `flexible_kpis`「アプリ登録件数」「アプリ登録累計」 |
@@ -51,10 +51,14 @@
                                                                                           ├→ buildMonthlyReportRow ─→ SummaryTable
   flexible_kpis (来院数, 診療日数, 予約率, 離脱率 ほか) ────────────────────────────────┘
 
-[② メンテナンス推移] (2026-05-09 切替)
-  flexible_kpis (kpi_name LIKE '来院人数_ステージ内訳_%') ──┐
-                                                              ├→ stageMaintenanceByMonth → chartData{メンテ数, メンテ以外}
-  data_mappings (mapping_type='maintenance', key=clinic_name) ┘   メンテ数=マッピング項目の合計、メンテ以外=それ以外の合計
+[② メンテナンス推移] (2026-05-09 メンテ以外計算改定)
+  flexible_kpis (kpi_name LIKE '来院人数_ステージ内訳%') ─┬→ kpi_name='来院人数_ステージ内訳用' = visitTotal (来院(人)合計, 患者IDユニーク)
+                                                            │  kpi_name='来院人数_ステージ内訳_*'   = 各ステージ詳細
+  data_mappings (mapping_type='maintenance', key=clinic_name) ─→ menteItems
+                                                            │
+                                                            ▼
+                              chartData{ メンテ数 = Σ stage_value where item ∈ menteItems
+                                       メンテ以外 = max(visitTotal − メンテ数, 0)  // visitTotal 無い月は null }
 
 [③ 男女比]
   patient_snapshots.gender ─→ countGender() in app/report/page.tsx ─→ GenderRatioChart

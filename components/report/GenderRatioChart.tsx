@@ -19,7 +19,7 @@ export default function GenderRatioChart({ data, title = '男女比', height = 3
   ]
 
   return (
-    <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm">
+    <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <h3 className="text-sm font-black text-slate-700 uppercase tracking-widest">{title}</h3>
         <span className="text-xs font-bold text-slate-400 tabular-nums">合計 {total.toLocaleString('ja-JP')} 名</span>

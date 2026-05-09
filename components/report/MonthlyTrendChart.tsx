@@ -57,8 +57,8 @@ export default function MonthlyTrendChart({
   }
 
   const containerClass = highlight
-    ? 'bg-white p-6 md:p-8 rounded-3xl border-2 border-rose-300 shadow-md ring-4 ring-rose-100'
-    : 'bg-white p-6 md:p-8 rounded-3xl border border-slate-200 shadow-sm'
+    ? 'bg-white p-6 md:p-8 rounded-xl border-2 border-rose-300 shadow-md ring-4 ring-rose-100'
+    : 'bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm'
 
   return (
     <div className={containerClass}>

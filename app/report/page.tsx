@@ -26,6 +26,8 @@ type StageBreakdownRow = {
 
 const RANGE_MONTHS = 24
 const STAGE_PREFIX = '来院人数_ステージ内訳_'
+// 日別状況CSV の「来院(人)」合計列。患者IDユニーク値で、メンテ以外 = この値 − メンテ数 に使用
+const STAGE_VISIT_TOTAL_KPI = '来院人数_ステージ内訳用'
 
 const getCurrentJstYearMonth = () => {
   const parts = new Intl.DateTimeFormat('ja-JP', {
@@ -191,7 +193,8 @@ export default function ReportPage() {
           .eq('is_target', false)
           .gte('year', startYear)
           .lte('year', endYear)
-          .like('kpi_name', `${STAGE_PREFIX}%`),
+          // '来院人数_ステージ内訳_*' (各ステージ) と '来院人数_ステージ内訳用' (来院合計) を両方取得
+          .like('kpi_name', '来院人数_ステージ内訳%'),
         supabase
           .from('data_mappings')
           .select('value')
@@ -245,18 +248,27 @@ export default function ReportPage() {
   )
 
   // 来院ステージ内訳をメンテナンス設定で分類して月次集計
-  // メンテ数 = data_mappings(maintenance) で指定された項目の合計、メンテ以外 = それ以外の合計
+  //   メンテ数    = data_mappings(maintenance) で指定された項目（来院人数_ステージ内訳_*）の合計
+  //   メンテ以外  = 来院人数_ステージ内訳用（来院(人)合計）− メンテ数
+  // 来院人数_ステージ内訳用 が存在しない月は メンテ以外 を null とする
   const stageMaintenanceByMonth = useMemo(() => {
-    const map = new Map<string, { mente: number; nonMente: number; hasData: boolean }>()
+    const map = new Map<
+      string,
+      { mente: number; visitTotal: number | null; hasMenteData: boolean }
+    >()
     for (const r of stageRows) {
       if (r.value === null || !Number.isFinite(r.value)) continue
       const key = `${r.year}-${r.month}`
-      const item = r.kpi_name.replace(STAGE_PREFIX, '')
-      const isMente = maintenanceItems.has(item)
-      const cur = map.get(key) ?? { mente: 0, nonMente: 0, hasData: false }
-      if (isMente) cur.mente += r.value
-      else cur.nonMente += r.value
-      cur.hasData = true
+      const cur = map.get(key) ?? { mente: 0, visitTotal: null, hasMenteData: false }
+      if (r.kpi_name === STAGE_VISIT_TOTAL_KPI) {
+        cur.visitTotal = (cur.visitTotal ?? 0) + r.value
+      } else if (r.kpi_name.startsWith(STAGE_PREFIX)) {
+        const item = r.kpi_name.replace(STAGE_PREFIX, '')
+        if (maintenanceItems.has(item)) {
+          cur.mente += r.value
+          cur.hasMenteData = true
+        }
+      }
       map.set(key, cur)
     }
     return map
@@ -266,10 +278,17 @@ export default function ReportPage() {
     () =>
       monthlyRows.map(r => {
         const stage = stageMaintenanceByMonth.get(`${r.year}-${r.month}`)
+        // メンテ数: マッピング項目の合計（マッピングが空でも0を返す）
+        // メンテ以外: 来院人数_ステージ内訳用 − メンテ数（合計値が無ければ null）
+        const menteValue = stage?.hasMenteData ? stage.mente : null
+        const nonMenteValue =
+          stage?.visitTotal !== null && stage?.visitTotal !== undefined
+            ? Math.max(stage.visitTotal - (stage.mente ?? 0), 0)
+            : null
         return {
           name: formatYearMonth(r.year, r.month),
-          メンテ数: stage?.hasData ? stage.mente : null,
-          メンテ以外: stage?.hasData ? stage.nonMente : null,
+          メンテ数: menteValue,
+          メンテ以外: nonMenteValue,
           新規登録件数: r.app_registered_new,
           登録数: r.app_registered_existing,
           獲得率: r.acquisition_rate,

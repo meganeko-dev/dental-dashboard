@@ -19,7 +19,7 @@ export default function ReportHeader({
   rangeLabel,
 }: Props) {
   return (
-    <header className="flex flex-wrap justify-between items-end bg-white p-8 rounded-3xl shadow-sm border border-slate-200 gap-6">
+    <header className="flex flex-wrap justify-between items-end bg-white p-8 rounded-xl shadow-sm border border-slate-200 gap-6">
       <div className="flex gap-6 items-start">
         <div className="space-y-1">
           <h1 className="text-3xl font-black tracking-tighter text-slate-900 uppercase italic">Report</h1>
