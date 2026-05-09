@@ -11,6 +11,7 @@ import { DataEditor } from '@/components/admin/DataEditor'
 import { MappingManager } from '@/components/admin/MappingManager'
 import { InsuranceRevenueSetter } from '@/components/admin/InsuranceRevenueSetter'
 import { StaffRevenueSetter } from '@/components/admin/StaffRevenueSetter'
+import { MaintenanceMappingSetter } from '@/components/admin/MaintenanceMappingSetter'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -22,7 +23,7 @@ export default function AdminPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'insurance'>('upload')
+  const [activeMenu, setActiveMenu] = useState<'upload' | 'goals' | 'edit' | 'mapping' | 'insurance' | 'maintenance'>('upload')
   const [insuranceTab, setInsuranceTab] = useState<'clinic' | 'staff'>('clinic')
 
   const handleLogout = async () => {
@@ -50,6 +51,7 @@ export default function AdminPage() {
           <MenuButton active={activeMenu === 'goals'} onClick={() => setActiveMenu('goals')} icon="🎯" label="目標入力" />
           <MenuButton active={activeMenu === 'insurance'} onClick={() => setActiveMenu('insurance')} icon="💰" label="売上データ入力" />
           <MenuButton active={activeMenu === 'edit'} onClick={() => setActiveMenu('edit')} icon="📝" label="データ修正" />
+          <MenuButton active={activeMenu === 'maintenance'} onClick={() => setActiveMenu('maintenance')} icon="🦷" label="メンテナンス設定" />
           {/* 条件付きレンダリング: 特定法人以外にはボタン自体を表示しない */}
           {showMapping && (
             <MenuButton active={activeMenu === 'mapping'} onClick={() => setActiveMenu('mapping')} icon="🔗" label="マッピング" />
@@ -65,6 +67,7 @@ export default function AdminPage() {
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{activeMenu} Mode</h2>
             <div className="flex gap-3 items-center">
+              <Link href="/report" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📑 Report</Link>
               {showTableView && (
                 <Link href="/table_view" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📊 Table</Link>
               )}
@@ -114,7 +117,8 @@ export default function AdminPage() {
             )
           )}
           {activeMenu === 'edit' && <DataEditor corpId={corpId} mode={mode} />}
-          
+          {activeMenu === 'maintenance' && <MaintenanceMappingSetter corpId={corpId} />}
+
           {/* コンテンツ側でもガードをかける */}
           {activeMenu === 'mapping' && showMapping && <MappingManager corpId={corpId} />}
         </div>

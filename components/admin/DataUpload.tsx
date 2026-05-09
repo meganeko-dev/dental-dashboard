@@ -256,6 +256,8 @@ export function DataUpload({ corpId }: { corpId: string }) {
             filePattern = "status";
           } else if (fileName.includes("日別状況")) {
             filePattern = "stage";
+          } else if (fileName.includes("患者リスト") || fileName.includes("患者一覧")) {
+            filePattern = "patient_list";
           } else if (fileName.includes("全Ｄｒ日別")) {
             filePattern = "sales_clinic";
             clinicId = "(CSVより取得)";
@@ -275,7 +277,7 @@ export function DataUpload({ corpId }: { corpId: string }) {
             filePattern = "shinsinkai_private";
             clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「日別状況」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
@@ -378,6 +380,28 @@ export function DataUpload({ corpId }: { corpId: string }) {
             }
 
             addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
+          // ── 患者リスト CSV 処理（個人情報保護のためサーバAPI経由でハッシュ化＋DELETE/INSERT）─
+          } else if (filePattern === 'patient_list') {
+            // 権限チェックはサーバ側で実施
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('clinicId', clinicId);
+
+            addLog(`  -> 患者リスト: サーバAPIへ送信中（ハッシュ化＋DELETE/INSERT）...`);
+
+            const apiRes = await fetch('/api/patient-list', {
+              method: 'POST',
+              body: formData,
+            });
+            const apiJson = await apiRes.json().catch(() => ({} as { error?: string; inserted?: number; deduplicated?: number }));
+            if (!apiRes.ok) {
+              throw new Error(`サーバAPIエラー: ${apiJson?.error ?? apiRes.statusText}`);
+            }
+            const dupNote = apiJson.deduplicated && apiJson.deduplicated > 0
+              ? `（CSV内重複 ${apiJson.deduplicated} 件は後出を採用）`
+              : '';
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name}（${apiJson.inserted}件のスナップショットを保存）${dupNote}`);
 
           // ── TN32FBH8専用: 新心会 売上CSV処理 ──────────────────────────────
           } else if (filePattern === 'shinsinkai_recept' || filePattern === 'shinsinkai_insurance' || filePattern === 'shinsinkai_private') {
@@ -496,7 +520,8 @@ export function DataUpload({ corpId }: { corpId: string }) {
             <p className="font-bold mb-1">複数ファイルの一括アップロード機能:</p>
             <ul className="list-disc list-inside space-y-1">
               <li>PC上で複数のファイルを選択（ShiftキーやCtrlキーを使用）するか、ドラッグ＆ドロップで一気に処理できます。</li>
-              <li>「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「ステージ日別状況」が混ざっていても自動で判別します。</li>
+              <li>「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「ステージ日別状況」「患者リスト」が混ざっていても自動で判別します。</li>
+              <li>「患者リスト」CSVはカルテ番号をサーバ側でハッシュ化し、ClinicIDごとに最新スナップショットのみ保持します（再アップで上書き）。</li>
               <li>途中で1つのファイルがエラーになっても、他のファイルはそのまま処理が続行されます。</li>
             </ul>
           </div>

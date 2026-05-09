@@ -743,9 +743,11 @@ export const DataImporter = {
 
   // ステージ日別状況の変換
   // 取得対象: 予約数・新患予約数・事前/無断キャンセル数・次回予約取得数/率
-  // 除外(Stats が正ソース): 来院人数_* / 当日キャンセル数
+  //          来院(人)>ステージ内訳の各小項目 (kpi_name = "来院人数_ステージ内訳_<小項目名>")
+  // 除外(Stats が正ソース): 来院人数_* (ステージ内訳プレフィックス無し) / 当日キャンセル数
   // 除外(engine が計算): キャンセル率
   // ※「率」はこのファイル内では "89.45%" のように % 表記 → % を除去してそのまま格納
+  // ※ 来院ステージ内訳の項目名・項目数はクリニックごとに異なる（動的取り込み）
   transformStage: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     if (data.length < 4) return [];
 
@@ -791,11 +793,25 @@ export const DataImporter = {
       } else if (major === "無断キャンセル(人)" && middle === "" && minor === "") {
         // 無断キャンセルはこのファイルでのみ取得可能
         kpiName = "無断キャンセル数";
+      } else if (major === "myDental(アプリ)") {
+        // myDental アプリ登録件数・累計（レポートタブ「アプリ登録者数」用）
+        if (middle === "登録件数") kpiName = "アプリ登録件数";
+        else if (middle === "累計") kpiName = "アプリ登録累計";
+      } else if (major === "ウェブ予約") {
+        // ウェブ予約 新患/再診（レポートタブ「ウェブ新患/再診」用）
+        if (middle === "新患") kpiName = "ウェブ予約_新患";
+        else if (middle === "再診") kpiName = "ウェブ予約_再診";
+      } else if (major === "キャンセル率" && middle === "" && minor === "") {
+        // キャンセル率 全体（レポートタブ「獲得率とキャンセル率」用）
+        kpiName = "キャンセル率_全体";
+      } else if (major === "来院(人)" && middle === "ステージ内訳" && minor !== "" && minor !== "-") {
+        // 来院ステージ内訳: 各小項目をクリニック別の動的KPIとして取り込む
+        // 項目名・項目数はクリニックごとに異なる。Phase4 メンテナンスマッピングの元データ
+        kpiName = `来院人数_ステージ内訳_${minor}`;
       }
-      // 除外: 来院(人) → Stats の transformStats で取得
+      // 除外: 来院(人)（合計列） → Stats の transformStats で取得
       // 除外: 当日キャンセル(人) → Stats の transformStats で取得
-      // 除外: キャンセル率 → kpi-engine が counts から計算
-      // 除外: ウェブ予約 / 実来院 / リマインド / 未来予約 → 現時点では不要
+      // 除外: 事前/当日/無断キャンセル / キャンセル率 のステージ内訳 → 現時点では不要
 
       if (kpiName) columnMapping[j] = kpiName;
     }
@@ -842,5 +858,138 @@ export const DataImporter = {
       }
     }
     return results;
-  }
+  },
+
+  // 患者リスト CSV → patient_snapshots レコードへの変換。
+  // カルテ番号はここでは未ハッシュ。サーバ API ルート側でハッシュ化する想定。
+  // 入力 data[0] = ヘッダー、data[1..] = 1行=1患者。先頭列は通し番号 (空)。
+  transformPatientList: (data: string[][]): PatientListInputRow[] => {
+    if (data.length < 2) return [];
+
+    const header = data[0] ?? [];
+    const idx = (label: string) => header.findIndex(c => (c ?? '').trim() === label);
+
+    const colKarte    = idx('カルテ番号');
+    const colVisit    = idx('来院状況');
+    const colMain     = idx('メンテ状況');
+    const colDr       = idx('Dr');
+    const colDh       = idx('DH');
+    const colGender   = idx('性別');
+    const colAge      = idx('年齢');
+    const colTags     = idx('タグ');
+    const colFirstDate  = idx('初回来院日');
+    const colFirstYm    = idx('初回来院月');
+    const colLastDate   = idx('前回来院日');
+    const colLastTreat  = idx('前回診療内容');
+    const colLastStage  = idx('前回ステージ');
+    const colLastHand   = idx('前回担当');
+    const colNextDate   = idx('次回予約日');
+    const colNextTreat  = idx('次回診療内容');
+    const colNextStage  = idx('次回ステージ');
+    const colNextHand   = idx('次回担当');
+    const colMainStart  = idx('メンテ開始日');
+    const colLastMain   = idx('直近メンテ日');
+    const colMainCount  = idx('メンテ回数');
+    const colVisitCount = idx('来院回数');
+    const colCancelCnt  = idx('キャンセル回数');
+    const colPriorCC    = idx('事前キャンセル回数');
+    const colClosed     = idx('終診');
+    const colVisitRes   = idx('前回来院結果');
+    const colChurnDdl   = idx('離脱限界日');
+    const colChurnFlag  = idx('離脱フラグ');
+
+    if (colKarte < 0) return [];
+
+    const cleanText = (v: string | undefined): string | null => {
+      const t = (v ?? '').trim();
+      return t === '' ? null : t;
+    };
+    const toInt = (v: string | undefined): number | null => {
+      const t = (v ?? '').trim().replace(/,/g, '');
+      if (t === '') return null;
+      const n = parseInt(t, 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    const toDate = (v: string | undefined): string | null => {
+      const t = (v ?? '').trim();
+      // 受け入れる形式: YYYY-MM-DD / YYYY/MM/DD
+      const m = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+      if (!m) return null;
+      const yyyy = m[1];
+      const mm = m[2].padStart(2, '0');
+      const dd = m[3].padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    };
+
+    const out: PatientListInputRow[] = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row) continue;
+      const karte = (row[colKarte] ?? '').trim();
+      if (!karte) continue;
+      out.push({
+        karte_number: karte,
+        visit_status: cleanText(row[colVisit]),
+        maintenance_status: cleanText(row[colMain]),
+        dr_name: cleanText(row[colDr]),
+        dh_name: cleanText(row[colDh]),
+        gender: cleanText(row[colGender]),
+        age: toInt(row[colAge]),
+        tags: cleanText(row[colTags]),
+        first_visit_date: toDate(row[colFirstDate]),
+        first_visit_yyyymm: cleanText(row[colFirstYm]),
+        last_visit_date: toDate(row[colLastDate]),
+        last_treatment: cleanText(row[colLastTreat]),
+        last_stage: cleanText(row[colLastStage]),
+        last_handler: cleanText(row[colLastHand]),
+        next_reserve_date: toDate(row[colNextDate]),
+        next_treatment: cleanText(row[colNextTreat]),
+        next_stage: cleanText(row[colNextStage]),
+        next_handler: cleanText(row[colNextHand]),
+        maintenance_start_date: toDate(row[colMainStart]),
+        last_maintenance_date: toDate(row[colLastMain]),
+        maintenance_count: toInt(row[colMainCount]),
+        visit_count: toInt(row[colVisitCount]),
+        cancel_count: toInt(row[colCancelCnt]),
+        prior_cancel_count: toInt(row[colPriorCC]),
+        closed_flag: cleanText(row[colClosed]),
+        last_visit_result: cleanText(row[colVisitRes]),
+        churn_deadline: toDate(row[colChurnDdl]),
+        churn_flag: cleanText(row[colChurnFlag]),
+      });
+    }
+    return out;
+  },
 }
+
+// 患者リスト CSV のパース結果（カルテ番号は生値のまま、API ルートでハッシュ化される）。
+export type PatientListInputRow = {
+  karte_number: string;
+  visit_status: string | null;
+  maintenance_status: string | null;
+  dr_name: string | null;
+  dh_name: string | null;
+  gender: string | null;
+  age: number | null;
+  tags: string | null;
+  first_visit_date: string | null;
+  first_visit_yyyymm: string | null;
+  last_visit_date: string | null;
+  last_treatment: string | null;
+  last_stage: string | null;
+  last_handler: string | null;
+  next_reserve_date: string | null;
+  next_treatment: string | null;
+  next_stage: string | null;
+  next_handler: string | null;
+  maintenance_start_date: string | null;
+  last_maintenance_date: string | null;
+  maintenance_count: number | null;
+  visit_count: number | null;
+  cancel_count: number | null;
+  prior_cancel_count: number | null;
+  closed_flag: string | null;
+  last_visit_result: string | null;
+  churn_deadline: string | null;
+  churn_flag: string | null;
+};
