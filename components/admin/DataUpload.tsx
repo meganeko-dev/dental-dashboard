@@ -394,14 +394,11 @@ export function DataUpload({ corpId }: { corpId: string }) {
               method: 'POST',
               body: formData,
             });
-            const apiJson = await apiRes.json().catch(() => ({} as { error?: string; inserted?: number; deduplicated?: number }));
+            const apiJson = await apiRes.json().catch(() => ({} as { error?: string; inserted?: number }));
             if (!apiRes.ok) {
               throw new Error(`サーバAPIエラー: ${apiJson?.error ?? apiRes.statusText}`);
             }
-            const dupNote = apiJson.deduplicated && apiJson.deduplicated > 0
-              ? `（CSV内重複 ${apiJson.deduplicated} 件は後出を採用）`
-              : '';
-            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name}（${apiJson.inserted}件のスナップショットを保存）${dupNote}`);
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name}（${apiJson.inserted}件のスナップショットを保存）`);
 
           // ── TN32FBH8専用: 新心会 売上CSV処理 ──────────────────────────────
           } else if (filePattern === 'shinsinkai_recept' || filePattern === 'shinsinkai_insurance' || filePattern === 'shinsinkai_private') {

@@ -13,10 +13,10 @@
 
 | # | ブロック | 形式 | コンポーネント | データソース |
 |---|---|---|---|---|
-| 1 | サマリー表 | 10行 × 24列（KPI×月） | `components/report/SummaryTable.tsx` | `summarized_clinic_kpi` ＋ `flexible_kpis` |
+| 1 | サマリー表 | 10行 × 24列（KPI×月） | `components/report/SummaryTable.tsx` | `summarized_clinic_kpi` ＋ `flexible_kpis`（2026-05-13: 予約取得数/率 → 当日予約取得数/率に置換） |
 | 2 | メンテナンス推移 | 積み上げ棒（実数ラベル付） | `components/report/MonthlyTrendChart.tsx` | `flexible_kpis`「来院人数_ステージ内訳_*」(メンテ数) + 「来院人数_ステージ内訳用」(来院合計) + `data_mappings(maintenance)`（2026-05-09 切替 / 2026-05-09 メンテ以外計算改定） |
-| 3 | 男女比 | ドーナツ（%表示） | `components/report/GenderRatioChart.tsx` | `patient_snapshots.gender` |
-| 4 | 年齢構成 | 横棒（9区分） | `components/report/AgeDistributionChart.tsx` | `patient_snapshots.age` |
+| 3 | 男女比 | ドーナツ（%表示） | `components/report/GenderRatioChart.tsx` | `v_patient_demographics_summary` (DB側集計 view / 2026-05-14 切替) |
+| 4 | 年齢構成 | 横棒（9区分） | `components/report/AgeDistributionChart.tsx` | `v_patient_demographics_summary` (同上) |
 | 5 | アプリ登録者数 | 積み上げ棒（実数ラベル付） | `MonthlyTrendChart.tsx` | `flexible_kpis`「アプリ登録件数」「アプリ登録累計」 |
 | 6 | 獲得率とキャンセル率 | 折れ線2本 | `MonthlyTrendChart.tsx` | `flexible_kpis`「次回予約取得率」「キャンセル率_全体」 |
 | 7 | ウェブ新患/再診 | 折れ線2本 | `MonthlyTrendChart.tsx` | `flexible_kpis`「ウェブ予約_新患」「ウェブ予約_再診」 |
@@ -37,7 +37,7 @@
 | CSV 種別 | importer | 書き出し先 | 取り込まれる kpi_name / カラム |
 |---|---|---|---|
 | 月ごとのStats | `transformStats` | `summarized_clinic_kpi` | working_days, patients_count, reserved_count, today_cancel_count, prior_cancel_count, noshow_cancel_count 他 |
-| 医院状況 | `transformStatus` | `flexible_kpis` | (既存) |
+| 医院状況 | `transformStatus` | `flexible_kpis` | 合計診療時間(H) / ユニーク来院患者数 (2026-05-13 追加: レポート「来院数(ユニーク)」/「平均来院数」の一次ソース) |
 | 日別状況 | `transformStage` | `flexible_kpis` | 既存: 予約人数_既存患者 / 予約人数_新規患者 / 次回予約取得数 / 次回予約取得率 / 事前キャンセル数 / 無断キャンセル数<br>2026-05-06 追加: アプリ登録件数 / アプリ登録累計 / ウェブ予約_新患 / ウェブ予約_再診 / キャンセル率_全体<br>**2026-05-07 追加**: `来院人数_ステージ内訳_<小項目名>`（来院(人)>ステージ内訳の各小項目を動的に取り込む。項目名・項目数はクリニックごとに異なる） |
 | `{法人ID}_メンテナンス.csv` | `transformSheetMaintenance` | `flexible_kpis` | メンテナンス数, 来院数, 予約人数_既存患者 |
 | `{法人ID}_離脱.csv` | `transformSheetChurn` | `flexible_kpis` | 患者数, メンテナンス_離脱数, メンテナンス_未予約数, 治療_離脱数, 治療_未予約数 |
@@ -90,6 +90,7 @@
 | `flexible_kpis` | 既存。新 `kpi_name` を保存可能 | 有効 | スキーマ変更なし、追加 kpi 名のみ |
 | `summarized_clinic_kpi` | 既存、変更なし | 有効 | |
 | `flexible_kpis_stage_breakdown_distinct` | **新規VIEW（2026-05-09作成）** | invoker | flexible_kpis の `来院人数_ステージ内訳_%` の DISTINCT(corporation_id, clinic_name, kpi_name) を返す。Admin メンテナンス設定UIで選択肢取得に利用（distinct 生クエリの 1000 行制限回避） |
+| `v_patient_demographics_summary` | **新規VIEW（2026-05-14作成）** | invoker | patient_snapshots を (corporation_id, clinic_id) 単位で集計し、男女別カウントと年齢9バケットを返す。フィルタ: last_visit_date >= 2025-01-01。レポートタブ男女比/年齢構成チャートのデータ源 |
 | `kpi_sheet_sources` | 既存、**RLS 無効**（advisor 警告） | **無効** | ⚠ 別途修正要（後述） |
 
 ### 3-2. 適用済みマイグレーション
@@ -97,8 +98,10 @@
 2. `patient_snapshots_write_policies` — 自法人配下に INSERT / DELETE のポリシー追加
 
 ### 3-3. patient_snapshots スキーマ要点
-- **PK**: `(corporation_id, clinic_id, patient_hash)` — clinic_id 単位で **DELETE → INSERT** で常に最新スナップショットだけ保持する運用
-- **patient_hash**: `SHA-256(corp_id:clinic_id:カルテ番号:KARTE_HASH_SECRET)` の hex
+- **PK**: `id` (uuid, gen_random_uuid()) — 2026-05-14 改定。同一カルテ番号の重複行を許容するため uuid PK に変更
+- **検索用 index**: `(corporation_id, clinic_id)` / `(corporation_id, clinic_id, patient_hash)` / `(..., gender)` / `(..., age)`
+- 運用: clinic_id 単位で **DELETE → INSERT** で常に最新スナップショットだけ保持
+- **patient_hash**: `SHA-256(corp_id:clinic_id:カルテ番号:KARTE_HASH_SECRET)` の hex（一意性は要求しない検索キー）
 - **インデックス**: `(corp_id, clinic_id)` / `(corp_id, clinic_id, gender)` / `(corp_id, clinic_id, age)`
 - **カラム**: Notion 5-4 のフルセット（visit_status, maintenance_status, dr_name, dh_name, gender, age, tags, first_visit_date, last_visit_date, next_reserve_date, maintenance_count, visit_count, cancel_count, prior_cancel_count, churn_flag 他）
 - **RLS ポリシー**: `corporation_id IN (SELECT corporation_id FROM profiles WHERE id = auth.uid())` で SELECT/INSERT/DELETE。UPDATE は未許可（運用上 DELETE/INSERT のみ）

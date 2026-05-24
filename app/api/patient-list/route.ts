@@ -96,22 +96,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'CSVから有効な患者行が見つかりませんでした。' }, { status: 400 })
     }
 
-    // patient_hash 単位で重複排除。CSV内に同一カルテ番号の行が複数あれば、後出の行で上書き。
-    // PK=(corporation_id, clinic_id, patient_hash) なので重複したまま INSERT すると一意制約違反になる。
-    const snapshotMap = new Map<string, SnapshotRow>()
-    for (const r of transformed) {
+    // CSV内に同一カルテ番号の重複行が存在しても全件保持する (2026-05-14 仕様変更)。
+    // PK は uuid id に変更済みで重複は INSERT 可能。patient_hash は検索用カラム。
+    const snapshotRows: SnapshotRow[] = transformed.map(r => {
       const { karte_number, ...rest } = r
-      const patient_hash = hashKarteNumber(corporationId, clinicId, karte_number)
-      snapshotMap.set(patient_hash, {
+      return {
         ...rest,
         corporation_id: corporationId,
         clinic_id: clinicId,
         clinic_name: clinicName,
-        patient_hash,
-      })
-    }
-    const snapshotRows: SnapshotRow[] = Array.from(snapshotMap.values())
-    const dedupedCount = transformed.length - snapshotRows.length
+        patient_hash: hashKarteNumber(corporationId, clinicId, karte_number),
+      }
+    })
 
     // ClinicID ごとに DELETE → INSERT で常に最新スナップショットだけ保持。
     const { error: deleteErr } = await supabase
@@ -141,7 +137,6 @@ export async function POST(req: NextRequest) {
       clinic_id: clinicId,
       clinic_name: clinicName,
       inserted,
-      deduplicated: dedupedCount,
     })
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : '不明なエラー'

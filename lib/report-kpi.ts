@@ -38,6 +38,10 @@ export type MonthlyReportRow = {
   mente_count: number | null
   reserved_rate: number | null
 
+  // 派生 (2026-05-13 追加): 来院数(ユニーク) と 未予約患者数 から算出
+  today_reserve_count: number | null  // 当日予約取得数 = visits_unique − unreserved_count
+  today_reserve_rate: number | null   // 当日予約取得率 = today_reserve_count / visits_unique × 100
+
   // flexible_kpis 由来 (2026-05-06 追加)
   app_registered_new: number | null      // アプリ登録件数（当月）
   app_registered_total: number | null    // アプリ登録累計
@@ -77,6 +81,8 @@ export const REPORT_FLEXIBLE_KPIS = [
   'ウェブ予約_再診',
   '次回予約取得率',
   'キャンセル率_全体',
+  // 2026-05-13 追加: 医院状況CSV由来
+  'ユニーク来院患者数',
 ] as const
 
 // 既存 app/page.tsx と同じ補正ロジック：0〜1 の値はパーセント表記に揃える
@@ -102,6 +108,10 @@ export function buildMonthlyReportRow(
   const sg = (col: string) => Number(summaryRow?.[col]) || 0
 
   const visits = sumKpi(flexRows, '来院数')
+  // 来院数(ユニーク): 医院状況CSV由来の「ユニーク来院患者数」を一次ソースとする (2026-05-13)
+  // 旧仕様の「来院数」(メンテナンス.csv 由来) はメンテナンス推移の計算で引き続き使用
+  const uniqueVisits = sumKpi(flexRows, 'ユニーク来院患者数')
+  const hasUniqueVisitsKpi = flexRows.some(r => r.kpi_name === 'ユニーク来院患者数')
   const flexWorkingDays = sumKpi(flexRows, '診療日数') + sumKpi(flexRows, '稼働日数')
   const menteCount = sumKpi(flexRows, 'メンテナンス数')
   const firstMenteCount = sumKpi(flexRows, '初回メンテ移行数')
@@ -136,7 +146,8 @@ export function buildMonthlyReportRow(
   const menteRate = visits > 0 ? (menteCount / visits) * 100 : null
   const churnTotal = menteChurn + treatChurn
   const churnRate = totalPatients > 0 ? (churnTotal / totalPatients) * 100 : null
-  const patientsAvg = workingDays > 0 ? visits / workingDays : null
+  // 平均来院数 = 総来院患者数(延べ) / 診療日数 (2026-05-13 仕様: 旧来の 来院数/診療日数 から修正)
+  const patientsAvg = workingDays > 0 ? patientsTotal / workingDays : null
   // 初回メンテ移行率: 新患来院数の集計 KPI が現状未取り込みのため、暫定で予約人数_新規患者を分母に使う
   const firstMenteRate = newPatients > 0 ? (firstMenteCount / newPatients) * 100 : null
 
@@ -154,14 +165,20 @@ export function buildMonthlyReportRow(
     prior_cancel_rate: hasSummary ? priorCancelRate : null,
     noshow_cancel_count: hasSummary ? noshowCancel : null,
 
-    visits_unique: hasFlex ? visits : null,
-    patients_count_avg: hasFlex && workingDays > 0 ? patientsAvg : null,
+    // 来院数(ユニーク): 医院状況CSVの「ユニーク来院患者数」を一次ソースとする (2026-05-13)
+    visits_unique: hasUniqueVisitsKpi ? uniqueVisits : null,
+    patients_count_avg: hasSummary && workingDays > 0 ? patientsAvg : null,
     new_patients_count: hasFlex ? newPatients : null,
     unreserved_count: hasFlex ? unreserved : null,
     unreserved_rate: hasFlex ? toPercentValue(unreservedRateRaw) : null,
     first_mente_count: hasFlex ? firstMenteCount : null,
     mente_count: hasFlex ? menteCount : null,
     reserved_rate: hasFlex ? toPercentValue(reservedRateRaw) : null,
+
+    // 当日予約取得数 = 来院数(ユニーク) − 未予約患者数（負値は0にクランプ）
+    // 当日予約取得率 = 当日予約取得数 / 来院数(ユニーク) × 100
+    today_reserve_count: hasUniqueVisitsKpi ? Math.max(uniqueVisits - unreserved, 0) : null,
+    today_reserve_rate: hasUniqueVisitsKpi && uniqueVisits > 0 ? (Math.max(uniqueVisits - unreserved, 0) / uniqueVisits) * 100 : null,
 
     app_registered_new: hasAppKpi ? appRegisteredNew : null,
     app_registered_total: hasAppKpi ? appRegisteredTotal : null,

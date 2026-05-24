@@ -4,6 +4,19 @@ import { createBrowserClient } from '@supabase/ssr'
 
 const STAGE_PREFIX = '来院人数_ステージ内訳_'
 
+// Supabase のエラーは Error インスタンスではなくプレーンオブジェクト ({message, details, hint, code}) のため
+// String(err) では "[object Object]" になる。message / details / hint を組み立ててユーザに見せる
+const formatError = (err: unknown): string => {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown }
+    const parts = [e.message, e.details, e.hint].filter(v => typeof v === 'string' && v !== '')
+    if (parts.length > 0) return parts.join(' / ') + (e.code ? ` (code: ${String(e.code)})` : '')
+    try { return JSON.stringify(err) } catch { /* fallthrough */ }
+  }
+  return String(err)
+}
+
 type MappingRow = {
   id: string
   key: string   // クリニック名
@@ -105,8 +118,8 @@ export function MaintenanceMappingSetter({ corpId }: { corpId: string }) {
       setSelectedItem('')
       await fetchAll()
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      alert(`登録に失敗しました: ${msg}`)
+      console.error('[MaintenanceMappingSetter] insert failed:', err)
+      alert(`登録に失敗しました: ${formatError(err)}`)
     } finally {
       setSaving(false)
     }
@@ -116,7 +129,8 @@ export function MaintenanceMappingSetter({ corpId }: { corpId: string }) {
     if (!confirm('この設定を削除しますか？')) return
     const { error } = await supabase.from('data_mappings').delete().eq('id', id)
     if (error) {
-      alert(`削除に失敗しました: ${error.message}`)
+      console.error('[MaintenanceMappingSetter] delete failed:', error)
+      alert(`削除に失敗しました: ${formatError(error)}`)
       return
     }
     await fetchAll()

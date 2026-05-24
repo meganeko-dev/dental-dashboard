@@ -369,13 +369,18 @@ export const DataImporter = {
 
   transformStatus: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     const headers = data[0];
-    // 診療日数は医院状況では暦日数ベースになるケースがあるため Stats を正とし、ここでは除外
-    // 合計診療時間(H) のみ取得（Stats の合計診療時間は分単位のため、時間単位はこちらが唯一のソース）
-    const TARGET_KPI = '合計診療時間(H)';
+    // 取得対象 (column → kpi_name):
+    //   '合計診療時間(H)' → 同名 (Stats は分単位のため時間単位はこちらが唯一のソース)
+    //   'ユニーク来院患者数' → 同名 (レポートタブの「来院数(ユニーク)」用。2026-05-13 追加)
+    // ※ 診療日数は医院状況では暦日数ベースになるケースがあるため Stats を正とし、ここでは除外
+    const TARGET_KPIS = ['合計診療時間(H)', 'ユニーク来院患者数'] as const;
     const ymIndex = headers.indexOf('年月');
-    const kpiIndex = headers.indexOf(TARGET_KPI);
+    if (ymIndex === -1) return [];
 
-    if (ymIndex === -1 || kpiIndex === -1) return [];
+    const kpiCols = TARGET_KPIS
+      .map(kpi => ({ kpi, idx: headers.indexOf(kpi) }))
+      .filter(c => c.idx !== -1);
+    if (kpiCols.length === 0) return [];
 
     const results: any[] = [];
 
@@ -386,14 +391,7 @@ export const DataImporter = {
 
       const year = parseInt(ymStr.substring(0, 4), 10);
       const month = parseInt(ymStr.substring(4, 6), 10);
-
-      const valStr = row[kpiIndex];
-      if (!valStr || valStr.trim() === '') continue;
-
-      const value = parseFloat(valStr.replace(/,/g, ''));
-      if (isNaN(value)) continue;
-
-      results.push({
+      const common = {
         corporation_id: corpId,
         clinic_id: clinicId,
         clinic_name: clinicName,
@@ -402,12 +400,18 @@ export const DataImporter = {
         month,
         date: `${year}-${String(month).padStart(2, '0')}-01`,
         segment: 'clinic',
-        kpi_name: TARGET_KPI,
-        value,
         is_target: false,
         treatment_type: '',
         staff_role: '',
-      });
+      };
+
+      for (const { kpi, idx } of kpiCols) {
+        const valStr = row[idx];
+        if (!valStr || valStr.trim() === '') continue;
+        const value = parseFloat(valStr.replace(/,/g, ''));
+        if (isNaN(value)) continue;
+        results.push({ ...common, kpi_name: kpi, value });
+      }
     }
     return results;
   },

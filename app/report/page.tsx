@@ -47,26 +47,36 @@ type GenderCounts = { female: number; male: number; unset: number }
 const EMPTY_GENDER: GenderCounts = { female: 0, male: 0, unset: 0 }
 const EMPTY_AGE: AgeBucket[] = AGE_BINS.map(b => ({ label: b.label, count: 0 }))
 
-const bucketAge = (rows: { age: number | null }[]): AgeBucket[] => {
-  const counts = AGE_BINS.map(() => 0)
-  for (const r of rows) {
-    if (r.age === null) continue
-    const idx = AGE_BINS.findIndex(b => r.age! >= b.min && r.age! <= b.max)
-    if (idx >= 0) counts[idx] += 1
-  }
-  return AGE_BINS.map((b, i) => ({ label: b.label, count: counts[i] }))
+// v_patient_demographics_summary view の1行から age バケット配列を作る
+// AGE_BINS と完全に同順で並ぶように DB 列を列挙する
+type DemographicsRow = {
+  male_count: number | null
+  female_count: number | null
+  unset_count: number | null
+  age_0_12: number | null
+  age_13_19: number | null
+  age_20_29: number | null
+  age_30_39: number | null
+  age_40_49: number | null
+  age_50_59: number | null
+  age_60_69: number | null
+  age_70_79: number | null
+  age_80_plus: number | null
 }
-
-const countGender = (rows: { gender: string | null }[]): GenderCounts => {
-  const counts: GenderCounts = { female: 0, male: 0, unset: 0 }
-  for (const r of rows) {
-    const g = (r.gender ?? '').trim()
-    if (g === '女性') counts.female++
-    else if (g === '男性') counts.male++
-    else counts.unset++
-  }
-  return counts
-}
+const AGE_COLUMNS: (keyof DemographicsRow)[] = [
+  'age_0_12', 'age_13_19', 'age_20_29', 'age_30_39', 'age_40_49',
+  'age_50_59', 'age_60_69', 'age_70_79', 'age_80_plus',
+]
+const toAgeBuckets = (row: DemographicsRow | null): AgeBucket[] =>
+  AGE_BINS.map((b, i) => ({
+    label: b.label,
+    count: row ? Number(row[AGE_COLUMNS[i]] ?? 0) : 0,
+  }))
+const toGenderCounts = (row: DemographicsRow | null): GenderCounts => ({
+  female: row ? Number(row.female_count ?? 0) : 0,
+  male:   row ? Number(row.male_count   ?? 0) : 0,
+  unset:  row ? Number(row.unset_count  ?? 0) : 0,
+})
 
 export default function ReportPage() {
   const router = useRouter()
@@ -224,19 +234,23 @@ export default function ReportPage() {
     }
 
     const fetchPatientSnapshot = async () => {
+      // 集計済み view から (corporation_id, clinic_id) で 1 行取得。
+      // フィルタ (last_visit_date >= 2025-01-01) はview側で適用済み。
       const { data, error } = await supabase
-        .from('patient_snapshots')
-        .select('gender, age')
+        .from('v_patient_demographics_summary')
+        .select('male_count, female_count, unset_count, age_0_12, age_13_19, age_20_29, age_30_39, age_40_49, age_50_59, age_60_69, age_70_79, age_80_plus')
         .eq('corporation_id', corpId)
         .eq('clinic_id', targetClinicId)
+        .maybeSingle()
       if (error) {
+        console.error('[ReportPage] v_patient_demographics_summary fetch failed:', error)
         setGenderCounts(EMPTY_GENDER)
         setAgeBuckets(EMPTY_AGE)
         return
       }
-      const rows = data ?? []
-      setGenderCounts(countGender(rows))
-      setAgeBuckets(bucketAge(rows))
+      const row = (data ?? null) as DemographicsRow | null
+      setGenderCounts(toGenderCounts(row))
+      setAgeBuckets(toAgeBuckets(row))
     }
 
     fetchPatientSnapshot()
