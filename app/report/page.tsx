@@ -15,6 +15,7 @@ import {
   REPORT_FLEXIBLE_KPIS,
   type MonthlyReportRow,
 } from '@/lib/report-kpi'
+import { isHiddenClinicById } from '@/lib/hidden-clinics'
 
 type ClinicOption = { id: string; name: string }
 type StageBreakdownRow = {
@@ -132,6 +133,7 @@ export default function ReportPage() {
 
       const list = (clinicRes.data ?? [])
         .filter((c: ClinicOption) => !!c.name)
+        .filter((c: ClinicOption) => !isHiddenClinicById(corpId, c.id))
         .map((c: ClinicOption) => ({ id: String(c.id), name: c.name }))
       setClinics(list)
       if (list.length > 0) {

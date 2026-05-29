@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
+import { isHiddenClinicById } from '@/lib/hidden-clinics'
 
 const DASHBOARD_TABS = [
   {
@@ -31,11 +32,16 @@ const DASHBOARD_TABS = [
     label: '予約精度',
     items: [
       { id: 'reserved_count', label: '予約数', unit: '名' },
-      { id: 'reserved_rate', label: '予約率', unit: '%' },
       { id: 'patients_count', label: '来院数', unit: '名' },
       { id: 'visit_rate', label: '来院率', unit: '%' },
+      { id: 'new_patients_count', label: '新患数', unit: '件' },
+      { id: 'new_patient_rate', label: '新患率', unit: '%' },
+      // 集計定義未定 (2026-05-28): 計算ロジック決定後に対応
+      { id: 'first_mente_transition_rate', label: '新患メンテ移行率', unit: '%' },
       { id: 'today_reserve_count', label: '当日予約取得数', unit: '件' },
       { id: 'today_reserve_rate', label: '当日予約取得率', unit: '%' },
+      { id: 'reserve_acquisition_count', label: '予約取得数', unit: '件' },
+      { id: 'reserve_acquisition_rate', label: '予約取得率', unit: '%' },
       { id: 'cancel_count', label: 'キャンセル数', unit: '件' },
       { id: 'cancel_rate', label: 'キャンセル率', unit: '%' },
       { id: 'today_cancel_count', label: '当日キャンセル数', unit: '件' },
@@ -53,13 +59,16 @@ const DASHBOARD_TABS = [
       { id: 'mente_count', label: 'メンテナンス数', unit: '件'},
       { id: 'mente_rate', label: 'メンテナンス率', unit: '%'},
       { id: 'first_mente_count', label: '初回メンテナンス数', unit: '件'},
-      { id: 'new_patients_count', label: '新患数', unit: '件'},
+      // 集計定義未定 (2026-05-28)
+      { id: 'maintenance_ratio', label: 'メンテナンス割合', unit: '%' },
       { id: 'unreserved_count', label: '未予約数', unit: '名' },
       { id: 'unreserved_rate', label: '未予約率', unit: '%' },
+      { id: 'new_patient_unreserved_count', label: '新患未予約数', unit: '名' },
+      { id: 'new_patient_unreserved_rate', label: '新患未予約率', unit: '%' },
       { id: 'churn_patients_count', label: '離脱数', unit: '名' },
       { id: 'churn_patients_rate', label: '離脱率', unit: '%' },
-      { id: 'maintenance_churn_count', label: 'メンテ_離脱数', unit: '名' },
-      { id: 'maintenance_churn_rate', label: 'メンテ_離脱率', unit: '%' },
+      { id: 'maintenance_churn_count', label: 'メンテ離脱数', unit: '名' },
+      { id: 'maintenance_churn_rate', label: 'メンテ離脱率', unit: '%' },
       // { id: 'chair_util_rate', label: 'チェア稼働率', unit: '%' },
     ]
   }
@@ -77,6 +86,11 @@ const CLINIC_RAW_KPIS = [
   '患者数',
   'メンテナンス_未予約数',
   '予約率',
+  // 2026-05-28 追加: 新患数 / 新患率 を 来院人数_新規患者 ベースに切替
+  '来院人数_新規患者',
+  '来院人数_既存患者',
+  // 2026-05-28 追加: 新患未予約数 / 新患未予約率 用
+  '新患未予約数',
 ]
 
 const RAW_CLINIC_KPI_IDS = new Set([
@@ -84,6 +98,9 @@ const RAW_CLINIC_KPI_IDS = new Set([
   'mente_rate',
   'first_mente_count',
   'new_patients_count',
+  'new_patient_rate',
+  'new_patient_unreserved_count',
+  'new_patient_unreserved_rate',
   'unreserved_count',
   'unreserved_rate',
   'churn_patients_count',
@@ -128,7 +145,23 @@ const calcClinicRawKpi = (rows: any[], kpiId: string) => {
     case 'first_mente_count':
       return sumRawKpi(rows, '初回メンテ移行数')
     case 'new_patients_count':
-      return sumRawKpi(rows, '予約人数_新規患者')
+      // 2026-05-28 仕様: flexible_kpis '来院人数_新規患者' を集計
+      return sumRawKpi(rows, '来院人数_新規患者')
+    case 'new_patient_rate': {
+      // 2026-05-28 仕様: 来院人数_新規患者 / 来院人数_既存患者 × 100
+      const newVisits = sumRawKpi(rows, '来院人数_新規患者')
+      const existingVisits = sumRawKpi(rows, '来院人数_既存患者')
+      return existingVisits > 0 ? (newVisits / existingVisits) * 100 : 0
+    }
+    case 'new_patient_unreserved_count':
+      // 2026-05-28 仕様: flexible_kpis '新患未予約数' を集計 ({法人ID}_新患.csv 由来)
+      return sumRawKpi(rows, '新患未予約数')
+    case 'new_patient_unreserved_rate': {
+      // 2026-05-28 仕様: 新患未予約数 / 来院人数_新規患者 × 100
+      const unreservedNew = sumRawKpi(rows, '新患未予約数')
+      const newVisits = sumRawKpi(rows, '来院人数_新規患者')
+      return newVisits > 0 ? (unreservedNew / newVisits) * 100 : 0
+    }
     case 'unreserved_count':
       return sumRawKpi(rows, '離脱患者')
     case 'unreserved_rate':
@@ -263,6 +296,7 @@ export default function Dashboard() {
         .order('id', { ascending: true })
 
       const names = (clinicRes ?? [])
+        .filter((clinic: ClinicOption) => !isHiddenClinicById(corpId, clinic.id))
         .map((clinic: ClinicOption) => clinic.name)
         .filter(Boolean)
       setClinics(names)

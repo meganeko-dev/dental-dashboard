@@ -215,6 +215,62 @@ export const DataImporter = {
     return results;
   },
 
+  // Google Sheets由来CSV: シート「新患」
+  // A列: 医院ID / B列: 医院名 / C列: 項目 / D列以降: 年月別の値
+  // 取得対象は「新患未予約数」のみ (他の項目はStats CSV等から取得可能)
+  transformSheetNewPatient: (
+    data: string[][],
+    corpId: string,
+    clinicIdToName: Map<string, string>
+  ): any[] => {
+    if (data.length < 2) return [];
+
+    const headers = data[0];
+    const ymCols = headers.slice(3).map(parseSheetYearMonth);
+    const results: any[] = [];
+    const kpiMap: Record<string, string> = {
+      '新患未予約数': '新患未予約数',
+    };
+
+    for (const row of data.slice(1)) {
+      const clinicId = String(row[0] ?? '').trim();
+      if (!clinicId) continue;
+
+      const sourceItem = String(row[2] ?? '').trim();
+      const kpiName = kpiMap[sourceItem];
+      if (!kpiName) continue;
+
+      const clinicName = getClinicNameFromMap(clinicIdToName, clinicId);
+      if (!clinicName) continue;
+
+      for (let i = 0; i < ymCols.length; i++) {
+        const ym = ymCols[i];
+        if (!ym) continue;
+
+        const value = parseSheetNumber(row[i + 3]);
+        if (value === null) continue;
+
+        results.push({
+          corporation_id: corpId,
+          clinic_id: clinicId,
+          clinic_name: clinicName,
+          staff_name: '',
+          year: ym.year,
+          month: ym.month,
+          date: monthFirstDate(ym.year, ym.month),
+          segment: 'clinic',
+          kpi_name: kpiName,
+          value,
+          is_target: false,
+          treatment_type: '',
+          staff_role: '',
+        });
+      }
+    }
+
+    return results;
+  },
+
   // Google Sheets由来CSV: シート「離脱」
   // A列: 医院ID / B列: 医院名 / C列: 項目 / D列: ステータス / E列以降: 年月別の値
   transformSheetChurn: (
@@ -285,10 +341,9 @@ export const DataImporter = {
     const CLINIC_KPI_MAP: Record<string, { kpi_name: string; multiply100: boolean }> = {
       '診療日数':       { kpi_name: '診療日数',         multiply100: false },
       '来院患者数':     { kpi_name: '来院患者数',        multiply100: false },
-      '継続患者':       { kpi_name: '来院人数_既存患者', multiply100: false },
-      '新患数':         { kpi_name: '来院人数_新規患者', multiply100: false },
+      // 2026-05-28 仕様変更: '来院人数_新規患者' / '来院人数_既存患者' は日別状況CSVを一次ソースとし、ここからは取得しない
+      // 2026-05-30 仕様変更: '当日キャンセル数' も日別状況CSVを一次ソースに移行
       '初回メンテ移行数': { kpi_name: '初回メンテ移行数', multiply100: false },
-      '当日キャンセル数': { kpi_name: '当日キャンセル数',  multiply100: false },
       '離脱患者':       { kpi_name: '離脱患者',          multiply100: false },
       '離脱率':         { kpi_name: '離脱率',            multiply100: false },
       'ユニット稼働率': { kpi_name: 'チェア稼働率',       multiply100: true  },
@@ -746,11 +801,15 @@ export const DataImporter = {
   },
 
   // ステージ日別状況の変換
-  // 取得対象: 予約数・新患予約数・事前/無断キャンセル数・次回予約取得数/率
+  // 取得対象: 予約数・新患予約数・事前/当日/無断キャンセル数・次回予約取得数/率
   //          来院(人) 合計列 (kpi_name = "来院人数_ステージ内訳用")
   //              → 患者IDユニーク値。レポートタブのメンテナンス推移で「メンテ以外 = 来院人数_ステージ内訳用 − メンテ数」の計算に使用
+  //          来院(人) > 新患 (kpi_name = "来院人数_新規患者") ※2026-05-28 仕様変更で Stats CSV から移行
+  //          来院(人) 合計列を kpi_name = "来院人数_既存患者" としても重複保存
+  //              ※実データ意味は「Total来院人数」だが kpi_name は便宜上据え置き。新患率カードの分母として参照される
   //          来院(人)>ステージ内訳の各小項目 (kpi_name = "来院人数_ステージ内訳_<小項目名>")
-  // 除外(Stats が正ソース): 来院人数_* (ステージ内訳プレフィックス無し) / 当日キャンセル数
+  //          当日キャンセル(人) 合計列 (kpi_name = "当日キャンセル数") ※2026-05-30 仕様変更で Stats CSV から移行
+  // 除外(Stats が正ソース): 来院人数_* (ステージ内訳プレフィックス無し / _新規患者 / _既存患者 を除く)
   // 除外(engine が計算): キャンセル率
   // ※「率」はこのファイル内では "89.45%" のように % 表記 → % を除去してそのまま格納
   // ※ 来院ステージ内訳の項目名・項目数はクリニックごとに異なる（動的取り込み）
@@ -796,6 +855,9 @@ export const DataImporter = {
       } else if (major === "事前キャンセル(人)" && middle === "" && minor === "") {
         // 事前キャンセルはこのファイルでのみ取得可能
         kpiName = "事前キャンセル数";
+      } else if (major === "当日キャンセル(人)" && middle === "" && minor === "") {
+        // 2026-05-30 仕様変更: 当日キャンセル数を Stats CSV から日別状況CSVへ移行
+        kpiName = "当日キャンセル数";
       } else if (major === "無断キャンセル(人)" && middle === "" && minor === "") {
         // 無断キャンセルはこのファイルでのみ取得可能
         kpiName = "無断キャンセル数";
@@ -814,13 +876,17 @@ export const DataImporter = {
         // 来院ステージ内訳: 各小項目をクリニック別の動的KPIとして取り込む
         // 項目名・項目数はクリニックごとに異なる。Phase4 メンテナンスマッピングの元データ
         kpiName = `来院人数_ステージ内訳_${minor}`;
+      } else if (major === "来院(人)" && middle === "新患" && minor === "") {
+        // 2026-05-28 仕様変更: 「来院(人) > 新患」列を 来院人数_新規患者 として取り込む。
+        // 旧来は Stats CSV の clinic,all,新患数 行を一次ソースにしていたが、
+        // 日別状況CSVをアップロードした最新月の値で上書きされる運用に切替。
+        kpiName = "来院人数_新規患者";
       } else if (major === "来院(人)" && middle === "" && minor === "") {
         // 来院(人) 合計列（患者IDユニーク値）。
         // Stats CSV の '来院患者数' とは別軸として、レポートタブのメンテナンス推移計算用に
         // '来院人数_ステージ内訳用' として保存（メンテ以外 = この値 − メンテ数）。
         kpiName = "来院人数_ステージ内訳用";
       }
-      // 除外: 当日キャンセル(人) → Stats の transformStats で取得
       // 除外: 事前/当日/無断キャンセル / キャンセル率 のステージ内訳 → 現時点では不要
 
       if (kpiName) columnMapping[j] = kpiName;
@@ -865,6 +931,14 @@ export const DataImporter = {
         if (isNaN(value)) continue;
 
         results.push({ ...common, kpi_name: kpiName, value });
+
+        // 2026-05-28 仕様変更: 来院(人) 合計列 (来院人数_ステージ内訳用) を
+        // 来院人数_既存患者 としても重複保存する。
+        // ※ クライアント指示: 実データ意味は「Total来院人数」だが、kpi_name は便宜上「来院人数_既存患者」のまま使用。
+        //   新患率カードの分母として参照される。
+        if (kpiName === '来院人数_ステージ内訳用') {
+          results.push({ ...common, kpi_name: '来院人数_既存患者', value });
+        }
       }
     }
     return results;

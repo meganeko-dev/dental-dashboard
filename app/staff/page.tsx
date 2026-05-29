@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext'
+import { isHiddenClinicByName } from '@/lib/hidden-clinics'
 
 const RATE_KEYS = new Set([
   '次回予約取得率',
@@ -175,7 +176,9 @@ export default function StaffDashboard() {
 
       if (data) {
         const clinicOrder = new Map((clinicData ?? []).map((clinic, index) => [clinic.name, index]))
-        const sortedData = [...data].sort((a, b) => {
+        // ハードコードされた非表示クリニック (lib/hidden-clinics.ts) はスタッフ一覧からも除外
+        const visibleData = data.filter(d => !isHiddenClinicByName(corpId, d.clinic_name))
+        const sortedData = [...visibleData].sort((a, b) => {
           if (a.clinic_name !== b.clinic_name) {
             const aOrder = clinicOrder.get(a.clinic_name) ?? Number.MAX_SAFE_INTEGER
             const bOrder = clinicOrder.get(b.clinic_name) ?? Number.MAX_SAFE_INTEGER

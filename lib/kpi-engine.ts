@@ -190,9 +190,11 @@ export const KpiEngine = {
       case 'reserved_rate':             return g('reserved_count') > 0 ? (g('patients_count') / g('reserved_count')) * 100 : 0;
       case 'visit_rate':                return g('reserved_count') > 0 ? (g('patients_count') / g('reserved_count')) * 100 : 0;
       case 'next_reserve_count':
-      case 'today_reserve_count':       return g('next_reserve_count');
+      case 'today_reserve_count':
+      case 'reserve_acquisition_count': return g('next_reserve_count');
       case 'next_reserve_rate':
-      case 'today_reserve_rate':        return g('next_reserve_rate');
+      case 'today_reserve_rate':
+      case 'reserve_acquisition_rate':  return g('next_reserve_rate');
       case 'cancel_count':              return g('today_cancel_count') + g('noshow_cancel_count');
       case 'cancel_rate': {
         const res = g('reserved_count');

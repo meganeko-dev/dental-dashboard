@@ -236,7 +236,7 @@ export function DataUpload({ corpId }: { corpId: string }) {
         try {
           const fileName = file.name.normalize('NFC');
           const fileBaseName = fileName.replace(/\.[^.]+$/, '').trim();
-          const sheetImportMatch = fileBaseName.match(/^([^_]+)_(メンテナンス|離脱)(?:\s*\(\d+\))?$/);
+          const sheetImportMatch = fileBaseName.match(/^([^_]+)_(メンテナンス|離脱|新患)(?:\s*\(\d+\))?$/);
           const nameParts = fileName.split("_");
           let clinicId = "";
           let filePattern = "";
@@ -248,7 +248,10 @@ export function DataUpload({ corpId }: { corpId: string }) {
 
           if (sheetImportMatch) {
             sheetCorpId = sheetImportMatch[1];
-            filePattern = sheetImportMatch[2] === 'メンテナンス' ? 'sheet_maintenance' : 'sheet_churn';
+            const sheetKind = sheetImportMatch[2];
+            filePattern = sheetKind === 'メンテナンス' ? 'sheet_maintenance'
+                        : sheetKind === '離脱' ? 'sheet_churn'
+                        : 'sheet_new_patient';
             clinicId = "(CSV内の医院IDより取得)";
           } else if (fileName.includes("月ごとのStats")) {
             filePattern = "stats";
@@ -277,13 +280,13 @@ export function DataUpload({ corpId }: { corpId: string }) {
             filePattern = "shinsinkai_private";
             clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「法人ID_新患」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
 
-          // ── Google Sheets由来CSV: メンテナンス / 離脱 ─────────────────────
-          if (filePattern === 'sheet_maintenance' || filePattern === 'sheet_churn') {
+          // ── Google Sheets由来CSV: メンテナンス / 離脱 / 新患 ─────────────────────
+          if (filePattern === 'sheet_maintenance' || filePattern === 'sheet_churn' || filePattern === 'sheet_new_patient') {
             if (!sheetCorpId) {
               throw new Error('ファイル名から法人IDを取得できませんでした。例: FWLRNER6_メンテナンス.csv');
             }
@@ -310,7 +313,9 @@ export function DataUpload({ corpId }: { corpId: string }) {
 
             const transformed = filePattern === 'sheet_maintenance'
               ? DataImporter.transformSheetMaintenance(rawData, sheetCorpId, clinicIdToName)
-              : DataImporter.transformSheetChurn(rawData, sheetCorpId, clinicIdToName);
+              : filePattern === 'sheet_churn'
+              ? DataImporter.transformSheetChurn(rawData, sheetCorpId, clinicIdToName)
+              : DataImporter.transformSheetNewPatient(rawData, sheetCorpId, clinicIdToName);
 
             addLog(`  -> 変換完了: ${transformed.length} 件のレコードを作成。保存を開始します...`);
 
