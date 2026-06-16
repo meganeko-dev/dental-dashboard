@@ -279,8 +279,14 @@ export function DataUpload({ corpId }: { corpId: string }) {
           } else if (fileName.includes("新心会") && fileName.includes("自費売上")) {
             filePattern = "shinsinkai_private";
             clinicId = "(CSVより取得)";
+          } else if (fileName.includes("新心会") && fileName.includes("合計売上")) {
+            filePattern = "shinsinkai_total_sales";
+            clinicId = "(CSVより取得)";
+          } else if (fileName.includes("新心会") && fileName.includes("自費率")) {
+            filePattern = "shinsinkai_private_rate";
+            clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「法人ID_新患」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「法人ID_新患」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上/合計売上/自費率」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
@@ -406,14 +412,16 @@ export function DataUpload({ corpId }: { corpId: string }) {
             addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name}（${apiJson.inserted}件のスナップショットを保存）`);
 
           // ── TN32FBH8専用: 新心会 売上CSV処理 ──────────────────────────────
-          } else if (filePattern === 'shinsinkai_recept' || filePattern === 'shinsinkai_insurance' || filePattern === 'shinsinkai_private') {
+          } else if (filePattern === 'shinsinkai_recept' || filePattern === 'shinsinkai_insurance' || filePattern === 'shinsinkai_private' || filePattern === 'shinsinkai_total_sales' || filePattern === 'shinsinkai_private_rate') {
             if (profile?.corporation_id !== 'TN32FBH8') {
               throw new Error('このファイル形式（新心会売上CSV）は対応していない法人アカウントです。');
             }
 
             const kpiType = filePattern === 'shinsinkai_recept' ? 'recept'
                           : filePattern === 'shinsinkai_insurance' ? 'insurance'
-                          : 'private';
+                          : filePattern === 'shinsinkai_private' ? 'private'
+                          : filePattern === 'shinsinkai_total_sales' ? 'total_sales'
+                          : 'private_rate';
 
             const rawData = await DataImporter.parseCSVAsArray(file);
             if (rawData.length < 2) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');

@@ -11,7 +11,7 @@ import GenderRatioChart from '@/components/report/GenderRatioChart'
 import AgeDistributionChart, { AGE_BINS, type AgeBucket } from '@/components/report/AgeDistributionChart'
 import {
   buildMonthlyReportRows,
-  buildPastMonths,
+  buildMonthRange,
   REPORT_FLEXIBLE_KPIS,
   type MonthlyReportRow,
 } from '@/lib/report-kpi'
@@ -25,21 +25,23 @@ type StageBreakdownRow = {
   value: number | null
 }
 
-const RANGE_MONTHS = 24
+// レポート表示期間の起点 (2026-06-17 設定: 2025/1 固定)
+const REPORT_START_YEAR = 2025
+const REPORT_START_MONTH = 1
 const STAGE_PREFIX = '来院人数_ステージ内訳_'
 // 日別状況CSV の「来院(人)」合計列。患者IDユニーク値で、メンテ以外 = この値 − メンテ数 に使用
 const STAGE_VISIT_TOTAL_KPI = '来院人数_ステージ内訳用'
 
+// 初期表示の年月: JST 当日の1ヶ月前 (例: 2026/6 表示中 → 2026/5)
 const getCurrentJstYearMonth = () => {
   const parts = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
     year: 'numeric',
     month: 'numeric',
   }).formatToParts(new Date())
-  return {
-    year: Number(parts.find(p => p.type === 'year')?.value),
-    month: Number(parts.find(p => p.type === 'month')?.value),
-  }
+  const year = Number(parts.find(p => p.type === 'year')?.value)
+  const month = Number(parts.find(p => p.type === 'month')?.value)
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
 }
 
 const formatYearMonth = (year: number, month: number) => `${year}/${month}`
@@ -93,7 +95,7 @@ export default function ReportPage() {
 
   const currentPeriod = useMemo(() => getCurrentJstYearMonth(), [])
   const months = useMemo(
-    () => buildPastMonths(currentPeriod.year, currentPeriod.month, RANGE_MONTHS),
+    () => buildMonthRange(REPORT_START_YEAR, REPORT_START_MONTH, currentPeriod.year, currentPeriod.month),
     [currentPeriod],
   )
   const startYear = months[0].year

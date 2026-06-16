@@ -8,6 +8,11 @@ import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '@/context/AuthContext'
 import { isHiddenClinicByName } from '@/lib/hidden-clinics'
+import { buildMonthRange } from '@/lib/report-kpi'
+
+// 複合グラフの表示期間の起点 (2026-06-17 設定: 2025/1 固定)
+const CHART_START_YEAR = 2025
+const CHART_START_MONTH = 1
 
 const RATE_KEYS = new Set([
   '次回予約取得率',
@@ -45,17 +50,21 @@ const calculateStaffForecast = (summaryRows: any[], rawRows: any[], kpiId: strin
     return KpiEngine.calculateForecastFromSummarizedStaff(summaryRows, kpiId, currentYear, currentMonth)
   }
 
-  const monthlyRows = Array.from({ length: 12 }, (_, index) => {
-    const month = index + 1
-    const rows = rawRows.filter(row => Number(row.month) === month)
-    return { year: currentYear, month, value: calcStaffReservedRate(rows) }
-  })
+  // 2026-06-17 仕様変更で historyRawData が複数年に渡るため、(year, month) でグルーピング
+  const ymKeys = new Set<string>(rawRows.map(r => `${r.year}-${r.month}`))
+  const monthlyRows = [...ymKeys].map(key => {
+    const [y, m] = key.split('-').map(Number)
+    const rows = rawRows.filter(r => Number(r.year) === y && Number(r.month) === m)
+    return { year: y, month: m, value: calcStaffReservedRate(rows) }
+  }).sort((a, b) => (a.year - b.year) || (a.month - b.month))
+
   const past = monthlyRows.filter(row => row.year < currentYear || (row.year === currentYear && row.month < currentMonth))
   const values = past.filter(row => row.value > 0).slice(-3)
   if (values.length === 0) return null
   return values.reduce((sum, row) => sum + row.value, 0) / values.length
 }
 
+// 初期表示の年月: JST 当日の1ヶ月前 (例: 2026/6 表示中 → 2026/5)
 const getCurrentJstPeriod = () => {
   const parts = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
@@ -63,10 +72,9 @@ const getCurrentJstPeriod = () => {
     month: 'numeric',
   }).formatToParts(new Date())
 
-  return {
-    year: Number(parts.find(part => part.type === 'year')?.value),
-    month: Number(parts.find(part => part.type === 'month')?.value),
-  }
+  const year = Number(parts.find(part => part.type === 'year')?.value)
+  const month = Number(parts.find(part => part.type === 'month')?.value)
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
 }
 
 const DASHBOARD_TABS = [
@@ -263,12 +271,12 @@ export default function StaffDashboard() {
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', prevYear).eq('month', prevMonth),
         supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear - 1).eq('month', selectedMonth),
-        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true }),
+        supabase.from('summarized_staff_kpi').select('*').eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).gte('year', CHART_START_YEAR).order('year', { ascending: true }).order('month', { ascending: true }),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).eq('kpi_name', '予約率'),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', compareStaff).eq('clinic_name', compareClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).eq('kpi_name', '予約率'),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', prevYear).eq('month', prevMonth).eq('kpi_name', '予約率'),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear - 1).eq('month', selectedMonth).eq('kpi_name', '予約率'),
-        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).eq('year', selectedYear).eq('kpi_name', '予約率')
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('staff_name', targetStaff).eq('clinic_name', targetClinic).eq('segment', 'staff').eq('is_target', false).gte('year', CHART_START_YEAR).eq('kpi_name', '予約率')
       ]);
 
       setTargetData(targetRes.data || []);
@@ -308,11 +316,11 @@ export default function StaffDashboard() {
   }
 
   const chartData = useMemo(() => {
-    return Array.from({ length: 12 }, (_, i) => {
-      const m = i + 1;
-      const row = historyData.find(h => h.month === m) || null;
+    const months = buildMonthRange(CHART_START_YEAR, CHART_START_MONTH, currentPeriod.year, currentPeriod.month);
+    return months.map(({ year, month }) => {
+      const row = historyData.find(h => Number(h.year) === year && Number(h.month) === month) || null;
       return {
-        name: `${m}月`,
+        name: `${year}/${month}`,
         売上: KpiEngine.calcFromSummarizedStaff(row, 'total_amount'),
         来院人数: KpiEngine.calcFromSummarizedStaff(row, 'patients_count'),
         次回予約取得率: KpiEngine.calcFromSummarizedStaff(row, 'next_reserve_rate'),
@@ -321,7 +329,7 @@ export default function StaffDashboard() {
         離脱率: KpiEngine.calcFromSummarizedStaff(row, 'churn_patients_rate'),
       };
     });
-  }, [historyData]);
+  }, [historyData, currentPeriod]);
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && staffOptions.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Staff Analytics...</div>
@@ -381,7 +389,10 @@ export default function StaffDashboard() {
                 <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
                 <Tooltip
                   contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                  formatter={(value: number, name: string) => formatChartTooltipValue(value, name)}
+                  formatter={(value, name) => {
+                    const v = typeof value === 'number' ? value : Number(value) || 0;
+                    return formatChartTooltipValue(v, String(name ?? ''));
+                  }}
                 />
                 <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }} />
 

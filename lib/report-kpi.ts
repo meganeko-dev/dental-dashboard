@@ -229,3 +229,19 @@ export function buildPastMonths(
   }
   return result
 }
+
+// 開始(year,month)〜終了(year,month) を両端包含で昇順に返す
+export function buildMonthRange(
+  startYear: number,
+  startMonth: number,
+  endYear: number,
+  endMonth: number,
+): { year: number; month: number }[] {
+  const result: { year: number; month: number }[] = []
+  const start = startYear * 12 + (startMonth - 1)
+  const end = endYear * 12 + (endMonth - 1)
+  for (let t = start; t <= end; t++) {
+    result.push({ year: Math.floor(t / 12), month: (t % 12) + 1 })
+  }
+  return result
+}

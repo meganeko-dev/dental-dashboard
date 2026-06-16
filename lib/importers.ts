@@ -736,25 +736,30 @@ export const DataImporter = {
     return results;
   },
 
-  // TN32FBH8専用: 新心会 売上CSV（レセプト数 / 保険売上 / 自費売上）
+  // TN32FBH8専用: 新心会 売上CSV（レセプト数 / 保険売上 / 自費売上 / 合計売上 / 自費率）
   // フォーマット: 法人名, 医院ID, 医院名, 202501, 202502, ...
-  // 保険売上・自費売上は千円単位のため × 1000 して円に変換
+  // 保険売上・自費売上・合計売上は千円単位のため × 1000 して円に変換
+  // 自費率は "33.7%" 表記 → % 除去してそのまま格納
   transformShinshinkai: (
     data: string[][],
     corpId: string,
-    kpiType: 'recept' | 'insurance' | 'private'
+    kpiType: 'recept' | 'insurance' | 'private' | 'total_sales' | 'private_rate'
   ): any[] => {
     if (data.length < 2) return [];
 
     const KPI_NAME_MAP = {
-      recept:    'レセプト',
-      insurance: '社会保険_金額',
-      private:   '自費治療_金額',
+      recept:       'レセプト',
+      insurance:    '社会保険_金額',
+      private:      '自費治療_金額',
+      total_sales:  '合計売上',
+      private_rate: '自費率',
     };
     const MULTIPLY_MAP = {
-      recept:    1,
-      insurance: 1000,
-      private:   1000,
+      recept:       1,
+      insurance:    1000,
+      private:      1000,
+      total_sales:  1000,
+      private_rate: 1,
     };
 
     const kpiName = KPI_NAME_MAP[kpiType];
@@ -772,7 +777,7 @@ export const DataImporter = {
         const ym = headers[j]?.trim();
         if (!ym || !/^\d{6}$/.test(ym)) continue;
 
-        const valStr = (row[j] ?? '').replace(/,/g, '').trim();
+        const valStr = (row[j] ?? '').replace(/,/g, '').replace(/%/g, '').trim();
         if (valStr === '') continue;
         const val = parseFloat(valStr);
         if (isNaN(val)) continue;

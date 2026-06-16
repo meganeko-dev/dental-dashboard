@@ -9,6 +9,11 @@ import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
 import { isHiddenClinicById } from '@/lib/hidden-clinics'
+import { buildMonthRange } from '@/lib/report-kpi'
+
+// 複合グラフの表示期間の起点 (2026-06-17 設定: 2025/1 固定)
+const CHART_START_YEAR = 2025
+const CHART_START_MONTH = 1
 
 const DASHBOARD_TABS = [
   {
@@ -24,7 +29,7 @@ const DASHBOARD_TABS = [
       { id: 'recept_price', label: 'レセプト単価', unit: '円/点' },
       { id: 'recept_count', label: 'レセプト数', unit: '件' },
       { id: 'avg_price', label: '平均単価', unit: '円' },
-      { id: 'patients_count', label: '来院数', unit: '名' },
+      { id: 'private_rate', label: '自費率', unit: '%' },
     ]
   },
   {
@@ -91,6 +96,8 @@ const CLINIC_RAW_KPIS = [
   '来院人数_既存患者',
   // 2026-05-28 追加: 新患未予約数 / 新患未予約率 用
   '新患未予約数',
+  // 2026-06-17 追加: 収益性タブの自費率カード用 (TN32FBH8専用 CSV 由来)
+  '自費率',
 ]
 
 const RAW_CLINIC_KPI_IDS = new Set([
@@ -108,6 +115,7 @@ const RAW_CLINIC_KPI_IDS = new Set([
   'maintenance_churn_count',
   'maintenance_churn_rate',
   'reserved_rate',
+  'private_rate',
 ])
 
 const RATE_KEYS = new Set([
@@ -178,6 +186,8 @@ const calcClinicRawKpi = (rows: any[], kpiId: string) => {
     }
     case 'reserved_rate':
       return toPercentValue(sumRawKpi(rows, '予約率'))
+    case 'private_rate':
+      return sumRawKpi(rows, '自費率')
     default:
       return 0
   }
@@ -193,11 +203,15 @@ const calculateClinicForecast = (summaryRows: any[], rawRows: any[], kpiId: stri
     return KpiEngine.calculateForecastFromSummarized(summaryRows, kpiId, currentYear, currentMonth)
   }
 
-  const monthlyRows = Array.from({ length: 12 }, (_, index) => {
-    const month = index + 1
-    const rows = rawRows.filter(row => Number(row.month) === month)
-    return { year: currentYear, month, value: calcClinicRawKpi(rows, kpiId) }
-  })
+  // rawRows を (year, month) でグルーピングしてから各月の値を算出。
+  // 2026-06-17 仕様変更で historyRawData が複数年に渡るようになったため、月のみのフィルタは不適切。
+  const ymKeys = new Set<string>(rawRows.map(r => `${r.year}-${r.month}`))
+  const monthlyRows = [...ymKeys].map(key => {
+    const [y, m] = key.split('-').map(Number)
+    const rows = rawRows.filter(r => Number(r.year) === y && Number(r.month) === m)
+    return { year: y, month: m, value: calcClinicRawKpi(rows, kpiId) }
+  }).sort((a, b) => (a.year - b.year) || (a.month - b.month))
+
   const past = monthlyRows.filter(row => row.year < currentYear || (row.year === currentYear && row.month < currentMonth))
   const values = past.filter(row => row.value > 0).slice(-3)
   if (values.length === 0) return null
@@ -209,6 +223,7 @@ const formatChartTooltipValue = (value: number, name: string) => {
   return RATE_KEYS.has(name) ? `${formatted}%` : formatted
 }
 
+// 初期表示の年月: JST 当日の1ヶ月前 (例: 2026/6 表示中 → 2026/5)
 const getCurrentJstPeriod = () => {
   const parts = new Intl.DateTimeFormat('ja-JP', {
     timeZone: 'Asia/Tokyo',
@@ -216,10 +231,9 @@ const getCurrentJstPeriod = () => {
     month: 'numeric',
   }).formatToParts(new Date())
 
-  return {
-    year: Number(parts.find(part => part.type === 'year')?.value),
-    month: Number(parts.find(part => part.type === 'month')?.value),
-  }
+  const year = Number(parts.find(part => part.type === 'year')?.value)
+  const month = Number(parts.find(part => part.type === 'month')?.value)
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
 }
 
 function SelectBox({ label, value, onChange, options, highlight }: any) {
@@ -365,12 +379,12 @@ export default function Dashboard() {
         supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('year', selectedYear).eq('month', selectedMonth),
         supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', prevYear).eq('month', prevMonth),
         supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear - 1).eq('month', selectedMonth),
-        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('year', selectedYear).order('month', { ascending: true }),
+        supabase.from('summarized_clinic_kpi').select('*').eq('corporation_id', corpId).eq('clinic_name', targetClinic).gte('year', CHART_START_YEAR).order('year', { ascending: true }).order('month', { ascending: true }),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).in('kpi_name', CLINIC_RAW_KPIS),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', compareClinic).eq('segment', 'clinic').eq('is_target', false).eq('year', selectedYear).eq('month', selectedMonth).in('kpi_name', CLINIC_RAW_KPIS),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('is_target', false).eq('year', prevYear).eq('month', prevMonth).in('kpi_name', CLINIC_RAW_KPIS),
         supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('is_target', false).eq('year', selectedYear - 1).eq('month', selectedMonth).in('kpi_name', CLINIC_RAW_KPIS),
-        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('is_target', false).eq('year', selectedYear).in('kpi_name', CLINIC_RAW_KPIS)
+        supabase.from('flexible_kpis').select(rawSelect).eq('corporation_id', corpId).eq('clinic_name', targetClinic).eq('segment', 'clinic').eq('is_target', false).gte('year', CHART_START_YEAR).in('kpi_name', CLINIC_RAW_KPIS)
       ])
 
       setTargetData(targetRes.data || [])
@@ -410,20 +424,21 @@ export default function Dashboard() {
   }
 
   const chartData = useMemo(() => {
-    return Array.from({ length: 12 }, (_, i) => {
-      const m = i + 1;
-      const row = historyData.find(h => h.month === m) || null;
+    const months = buildMonthRange(CHART_START_YEAR, CHART_START_MONTH, currentPeriod.year, currentPeriod.month);
+    return months.map(({ year, month }) => {
+      const row = historyData.find(h => Number(h.year) === year && Number(h.month) === month) || null;
+      const rawForMonth = historyRawData.filter(raw => Number(raw.year) === year && Number(raw.month) === month);
       return {
-        name: `${selectedYear}年${m}月`,
+        name: `${year}/${month}`,
         売上: KpiEngine.calcFromSummarized(row, 'total_amount'),
         来院人数: KpiEngine.calcFromSummarized(row, 'patients_count'),
         次回予約取得率: KpiEngine.calcFromSummarized(row, 'next_reserve_rate'),
         キャンセル率: KpiEngine.calcFromSummarized(row, 'cancel_rate'),
-        メンテナンス率: calcClinicRawKpi(historyRawData.filter(raw => Number(raw.month) === m), 'mente_rate'),
-        未予約率: calcClinicRawKpi(historyRawData.filter(raw => Number(raw.month) === m), 'unreserved_rate'),
+        メンテナンス率: calcClinicRawKpi(rawForMonth, 'mente_rate'),
+        未予約率: calcClinicRawKpi(rawForMonth, 'unreserved_rate'),
       };
     });
-  }, [historyData, historyRawData, selectedYear]);
+  }, [historyData, historyRawData, currentPeriod]);
 
   if (authLoading) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Authenticating...</div>
   if (loading && clinics.length === 0) return <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">Loading Dashboard...</div>
@@ -488,10 +503,11 @@ export default function Dashboard() {
               <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{fontSize: 10, fill: '#94a3b8'}} />
 
               {/* <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} /> */}
-              <Tooltip 
-                contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}} 
-                formatter={(value: number, name: string) => {
-                  return formatChartTooltipValue(value, name);
+              <Tooltip
+                contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                formatter={(value, name) => {
+                  const v = typeof value === 'number' ? value : Number(value) || 0;
+                  return formatChartTooltipValue(v, String(name ?? ''));
                 }}
               />
 
