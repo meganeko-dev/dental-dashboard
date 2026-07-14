@@ -347,6 +347,7 @@ export const DataImporter = {
       '離脱患者':       { kpi_name: '離脱患者',          multiply100: false },
       '離脱率':         { kpi_name: '離脱率',            multiply100: false },
       'ユニット稼働率': { kpi_name: 'チェア稼働率',       multiply100: true  },
+      '継続率':         { kpi_name: '予約取得率',         multiply100: false },
     };
 
     // stage 行から取得するステージ名 → kpi_name マッピング

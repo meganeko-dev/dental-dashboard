@@ -193,8 +193,9 @@ export const KpiEngine = {
       case 'today_reserve_count':
       case 'reserve_acquisition_count': return g('next_reserve_count');
       case 'next_reserve_rate':
-      case 'today_reserve_rate':
-      case 'reserve_acquisition_rate':  return g('next_reserve_rate');
+      case 'today_reserve_rate':        return g('next_reserve_rate');
+      // 予約取得率: DBには0-1の生値で保管し、表示時のみ×100してパーセント化
+      case 'reserve_acquisition_rate':  return g('reserve_acquisition_rate') * 100;
       case 'cancel_count':              return g('today_cancel_count') + g('noshow_cancel_count');
       case 'cancel_rate': {
         const res = g('reserved_count');
