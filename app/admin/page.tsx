@@ -67,7 +67,9 @@ export default function AdminPage() {
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{activeMenu} Mode</h2>
             <div className="flex gap-3 items-center">
-              <Link href="/report" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📑 Report</Link>
+              {corpId === 'TN32FBH8' && (
+                <Link href="/report" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📑 Report</Link>
+              )}
               {showTableView && (
                 <Link href="/table_view" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-xs font-black shadow-sm transition-all">📊 Table</Link>
               )}

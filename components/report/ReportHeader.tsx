@@ -6,7 +6,6 @@ type Props = {
   corpName: string
   corpId: string
   mode: 'single' | 'multi'
-  showTableView: boolean
   clinics: string[]
   targetClinic: string
   setTargetClinic: (v: string) => void
@@ -14,7 +13,7 @@ type Props = {
 }
 
 export default function ReportHeader({
-  corpName, corpId, mode, showTableView,
+  corpName, corpId, mode,
   clinics, targetClinic, setTargetClinic,
   rangeLabel,
 }: Props) {
@@ -30,9 +29,6 @@ export default function ReportHeader({
         <div className="flex flex-col gap-2">
           <Link href="/" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Clinic View 🏥</Link>
           <Link href="/staff" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Staff View 👤</Link>
-          {showTableView && (
-            <Link href="/table_view" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Table View 📊</Link>
-          )}
           <Link href="/admin" prefetch={false} className="bg-slate-100 hover:bg-slate-200 text-slate-500 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-center">Admin ⚙️</Link>
         </div>
       </div>

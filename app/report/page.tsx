@@ -332,6 +332,9 @@ export default function ReportPage() {
       </div>
     )
   }
+  if (corpId !== 'TN32FBH8') {
+    return <div className="p-10 text-red-500 font-bold">このページはアクセス権限がありません。</div>
+  }
   if (loading && summaryRows.length === 0 && flexRows.length === 0 && clinics.length === 0) {
     return (
       <div className="p-10 text-slate-400 font-black uppercase italic animate-pulse">
@@ -340,7 +343,6 @@ export default function ReportPage() {
     )
   }
 
-  const showTableView = corpId === 'FWLRNER6'
   const rangeLabel = `${formatYearMonth(months[0].year, months[0].month)} 〜 ${formatYearMonth(currentPeriod.year, currentPeriod.month)}`
   const clinicNames = clinics.map(c => c.name)
 
@@ -358,7 +360,6 @@ export default function ReportPage() {
           corpName={corpName}
           corpId={corpId}
           mode={mode}
-          showTableView={showTableView}
           clinics={clinicNames}
           targetClinic={targetClinic}
           setTargetClinic={setTargetClinic}
