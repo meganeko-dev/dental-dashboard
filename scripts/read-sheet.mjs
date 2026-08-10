@@ -117,7 +117,8 @@ try {
   } else {
     // 指定レンジの値を取得
     const encoded = encodeURIComponent(rangeArg)
-    const data = await callSheets(`/values/${encoded}?majorDimension=ROWS`, token)
+    const renderOpt = process.env.SHEETS_RENDER === "FORMULA" ? "&valueRenderOption=FORMULA" : ""
+    const data = await callSheets(`/values/${encoded}?majorDimension=ROWS${renderOpt}`, token)
     console.log(JSON.stringify({
       range:  data.range,
       rowCount: (data.values ?? []).length,

@@ -253,6 +253,11 @@ export function DataUpload({ corpId }: { corpId: string }) {
                         : sheetKind === '離脱' ? 'sheet_churn'
                         : 'sheet_new_patient';
             clinicId = "(CSV内の医院IDより取得)";
+          } else if (fileName.includes("稼働率")) {
+            filePattern = "staff_utilization";
+            clinicId = "(ファイル内のclinic_idより取得)";
+          } else if (fileName.includes("ドクター別集計")) {
+            filePattern = "dr_revenue";
           } else if (fileName.includes("月ごとのStats")) {
             filePattern = "stats";
           } else if (fileName.includes("医院状況")) {
@@ -286,7 +291,7 @@ export function DataUpload({ corpId }: { corpId: string }) {
             filePattern = "shinsinkai_private_rate";
             clinicId = "(CSVより取得)";
           } else {
-            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「法人ID_新患」「月ごとのStats」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上/合計売上/自費率」のいずれかが含まれている必要があります。');
+            throw new Error('未対応のファイル名です。「法人ID_メンテナンス」「法人ID_離脱」「法人ID_新患」「月ごとのStats」「稼働率」「ドクター別集計」「医院状況」「日別状況」「患者リスト」「全Ｄｒ日別」「月計表（総括）」「日計表（患者…）」「新心会 - レセプト数/保険売上/自費売上/合計売上/自費率」のいずれかが含まれている必要があります。');
           }
 
           addLog(`  -> 判定: パターン [${filePattern}] / 抽出クリニックID: [${clinicId}]`);
@@ -443,6 +448,104 @@ export function DataUpload({ corpId }: { corpId: string }) {
 
             addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
 
+          // ── 稼働率(スタッフ): Excel を日次のまま staff_daily_utilization へ ────
+          } else if (filePattern === 'staff_utilization') {
+            if (!profile?.corporation_id) {
+              throw new Error('法人IDを取得できませんでした。再ログインしてください。');
+            }
+
+            const isExcel = /\.xlsx?$/i.test(fileName);
+            const rawData = isExcel
+              ? await DataImporter.parseXlsxAsArray(file)
+              : await DataImporter.parseCSVAsArray(file);
+            if (rawData.length < 2) throw new Error('ファイルが空か、正しく読み込めませんでした。');
+
+            const transformed = DataImporter.transformStaffUtilization(rawData, profile.corporation_id);
+            if (transformed.length === 0) {
+              throw new Error('取込対象の行がありませんでした。列の並び（B列=clinic_id, D列=営業日, F列=スタッフ名）をご確認ください。');
+            }
+
+            // ファイル内の clinic_id が自法人のものか検証する
+            const fileClinicIds = [...new Set(transformed.map(r => String(r.clinic_id)))];
+            const { data: ownClinics, error: ownClinicsError } = await supabase
+              .from('clinics')
+              .select('id')
+              .eq('corporation_id', profile.corporation_id);
+            if (ownClinicsError) {
+              throw new Error(`クリニック一覧を取得できませんでした: ${ownClinicsError.message}`);
+            }
+            const ownIds = new Set((ownClinics ?? []).map(c => String(c.id)));
+            const foreign = fileClinicIds.filter(id => !ownIds.has(id));
+            if (foreign.length > 0) {
+              throw new Error(`権限エラー: ファイル内の医院ID(${foreign.join(', ')})は現在の法人(${profile.corporation_id})に属していません。`);
+            }
+
+            addLog(`  -> 変換完了: ${transformed.length} 件（医院ID: ${fileClinicIds.join(', ')}）。保存を開始します...`);
+
+            const chunkSize = 500;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase
+                .from('staff_daily_utilization')
+                .upsert(chunk, { onConflict: 'corporation_id, clinic_id, staff_name, business_date' });
+              if (insertError) {
+                addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
+                throw new Error(`保存エラー: ${insertError.message}`);
+              }
+            }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
+          // ── ドクター別集計(築明会): 個人別/クリニック全体の売上 → flexible_kpis ──
+          } else if (filePattern === 'dr_revenue') {
+            // 期間(YYYYMM)をファイル名から抽出
+            const periodMatch = fileBaseName.match(/(20\d{2})(0[1-9]|1[0-2])/);
+            if (!periodMatch) {
+              throw new Error('ファイル名から年月(YYYYMM)を取得できませんでした。例: 928_ドクター別集計_202606.csv');
+            }
+            const drYear = Number(periodMatch[1]);
+            const drMonth = Number(periodMatch[2]);
+
+            // clinicId(ファイル名先頭) からクリニックを特定
+            const { data: clinicData, error: clinicError } = await supabase
+              .from('clinics')
+              .select('name, corporation_id')
+              .eq('id', clinicId)
+              .single();
+            if (clinicError || !clinicData) {
+              throw new Error(`ID: ${clinicId} に合致するクリニックが見つかりません。ファイル名先頭にクリニックIDが必要です（例: 928_ドクター別集計_202606.csv）。`);
+            }
+            if (profile?.corporation_id !== clinicData.corporation_id) {
+              throw new Error(`権限エラー: このデータの法人(${clinicData.corporation_id})は、現在の通信アカウント(${profile?.corporation_id})と一致しません。`);
+            }
+
+            // ドクター別集計は Shift_JIS
+            const rawData = await DataImporter.parseCSVAsArraySJIS(file);
+            if (rawData.length < 2) throw new Error('CSVが空か、正しく読み込めませんでした。');
+
+            const transformed = DataImporter.transformDrRevenue(
+              rawData, clinicData.name, clinicData.corporation_id, clinicId, drYear, drMonth
+            );
+            if (transformed.length === 0) {
+              throw new Error('取込対象の行がありませんでした。ヘッダーや列の並びをご確認ください。');
+            }
+
+            addLog(`  -> 変換完了: ${transformed.length} 件（${clinicData.name} / ${drYear}年${drMonth}月）。保存を開始します...`);
+
+            const chunkSize = 100;
+            for (let j = 0; j < transformed.length; j += chunkSize) {
+              const chunk = transformed.slice(j, j + chunkSize);
+              const { error: insertError } = await supabase.from('flexible_kpis').upsert(chunk, {
+                onConflict: 'corporation_id, clinic_name, staff_name, year, month, date, segment, kpi_name, is_target, treatment_type, staff_role'
+              });
+              if (insertError) {
+                addLog(`[DBエラー詳細] Upsert失敗: ${insertError.message} (Code: ${insertError.code})`);
+                throw new Error(`保存エラー: ${insertError.message}`);
+              }
+            }
+
+            addLog(`✅ [${i + 1}/${files.length}] 成功: ${file.name} を保存しました！`);
+
           // ── 通常ファイル処理 ────────────────────────────────────────────────
           } else {
             const { data: clinicData, error: clinicError } = await supabase
@@ -466,8 +569,10 @@ export function DataUpload({ corpId }: { corpId: string }) {
               throw new Error(`権限エラー: このデータの法人(${targetCorpId})は、現在の通信アカウント(${profile?.corporation_id})と一致しません。`);
             }
 
-            const rawData = await DataImporter.parseCSVAsArray(file);
-            if (rawData.length === 0) throw new Error('CSVファイルが空か、正しく読み込めませんでした。');
+            const rawData = /\.xlsx?$/i.test(fileName)
+              ? await DataImporter.parseXlsxAsArray(file)
+              : await DataImporter.parseCSVAsArray(file);
+            if (rawData.length === 0) throw new Error('ファイルが空か、正しく読み込めませんでした。');
 
             let transformed: any[] = [];
             if (filePattern === 'stats') {
@@ -558,7 +663,7 @@ function UploadCard({ title, desc, icon, onChange, disabled }: any) {
       <p className="text-xs text-slate-400 font-medium h-10">{desc}</p>
       <label className={`block cursor-pointer bg-slate-900 text-white py-3 rounded-xl text-xs font-black hover:bg-slate-800 transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
         ファイルを選択
-        <input type="file" accept=".csv" multiple className="hidden" onChange={onChange} disabled={disabled} />
+        <input type="file" accept=".csv,.xlsx,.xls" multiple className="hidden" onChange={onChange} disabled={disabled} />
       </label>
     </div>
   )

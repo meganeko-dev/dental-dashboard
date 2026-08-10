@@ -1,4 +1,5 @@
 import Papa from 'papaparse'
+import { isNonStaffName } from './staff-name-filter'
 
 // 💡 半角カタカナを全角に変換する補助関数
 const toFullWidthKatakana = (str: string): string => {
@@ -156,6 +157,46 @@ export const DataImporter = {
         error: (error) => reject(error),
       })
     })
+  },
+
+  // Excel(.xlsx/.xls) を parseCSVAsArray と同じ string[][] 形式で読み込むアダプタ。
+  // 下流の transform 系メソッドを CSV と共通で使えるようにするのが目的。
+  //
+  // 変換方針 (2026-07-20):
+  // - 日付セルは Excel のシリアル値で入るため 'YYYY-MM-DD' 文字列へ正規化する
+  //   (稼働率(スタッフ).xlsx の '営業日' '年月' 列が該当)
+  // - SheetJS は約400KB あるため import() で遅延読み込みする
+  parseXlsxAsArray: async (file: File): Promise<string[][]> => {
+    const XLSX = await import('xlsx')
+    const buffer = await file.arrayBuffer()
+    // cellDates: true で日付セルを Date として受け取る
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+    const sheetName = workbook.SheetNames[0]
+    if (!sheetName) return []
+    const sheet = workbook.Sheets[sheetName]
+
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      blankrows: false,
+      defval: '',
+      raw: true,
+    })
+
+    const toCell = (v: unknown): string => {
+      if (v === null || v === undefined) return ''
+      if (v instanceof Date) {
+        // タイムゾーンずれを避けるためローカル日付として組み立てる
+        const y = v.getFullYear()
+        const m = String(v.getMonth() + 1).padStart(2, '0')
+        const d = String(v.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}`
+      }
+      // JS の数値は 863.0 -> '863' となるため小数点以下の除去は不要
+      if (typeof v === 'number') return String(v)
+      return String(v).trim()
+    }
+
+    return rows.map(row => (Array.isArray(row) ? row.map(toCell) : []))
   },
 
   // Google Sheets由来CSV: シート「メンテナンス」
@@ -366,6 +407,43 @@ export const DataImporter = {
       // 'なし'・'訪問' は集計対象外
     };
 
+    // 2026-07-20 追加: スタッフ別行 (segment='staff') から取得するKPI
+    // カテゴリ1 が「予約診療担当）歯科医師」形式の行が対象。全26院で下記18項目が揃っている。
+    // 率系は Stats 内で 0-1 形式。DB には 0-1 の生値で保管し表示時に×100する既存方針に従う
+    // （'ユニット稼働率'→'チェア稼働率' のみ clinic 行の既存挙動に合わせて×100して保管）
+    const STAFF_KPI_MAP: Record<string, { kpi_name: string; multiply100: boolean }> = {
+      '来院患者数':         { kpi_name: '来院患者数',         multiply100: false },
+      '新患数':             { kpi_name: '新患数',             multiply100: false },
+      '診療日数':           { kpi_name: '診療日数',           multiply100: false },
+      '合計診療時間':       { kpi_name: '合計診療時間',       multiply100: false },
+      '超過時間':           { kpi_name: '超過時間',           multiply100: false },
+      '平均超過時間':       { kpi_name: '平均超過時間',       multiply100: false },
+      '当日キャンセル数':   { kpi_name: '当日キャンセル数',   multiply100: false },
+      '平均当日キャンセル数': { kpi_name: '平均当日キャンセル数', multiply100: false },
+      '当日キャンセル率':   { kpi_name: '当日キャンセル率',   multiply100: false },
+      '急患数':             { kpi_name: '急患数',             multiply100: false },
+      '平均急患数':         { kpi_name: '平均急患数',         multiply100: false },
+      '急患率':             { kpi_name: '急患率',             multiply100: false },
+      '継続患者':           { kpi_name: '継続患者',           multiply100: false },
+      '継続率':             { kpi_name: '継続率',             multiply100: false },
+      '離脱患者':           { kpi_name: '離脱患者',           multiply100: false },
+      '離脱率':             { kpi_name: '離脱率',             multiply100: false },
+      '初回メンテ移行数':   { kpi_name: '初回メンテ移行数',   multiply100: false },
+      'ユニット稼働率':     { kpi_name: 'チェア稼働率',       multiply100: true  },
+    };
+
+    // カテゴリ1「{予約診療|基本診療}担当）{職種}」を診療区分と職種に分解する。
+    // 職種が「その他」の行は SP/チェック・初診・枠外急患 といった予約枠であり実スタッフではないため除外する。
+    const parseStaffCategory = (cat: string): { treatmentType: string; staffRole: string } | null => {
+      const m = cat.match(/^(.+?)担当）(.+)$/);
+      if (!m) return null;
+      const treatmentType = m[1].trim();
+      const staffRole = m[2].trim();
+      if (!treatmentType || !staffRole) return null;
+      if (staffRole === 'その他') return null;
+      return { treatmentType, staffRole };
+    };
+
     for (let i = 1; i < data.length; i++) {
       const row = data[i];
       const cat1 = row[0]?.trim();
@@ -376,6 +454,10 @@ export const DataImporter = {
 
       let kpi_name: string | null = null;
       let multiply100 = false;
+      let segment = 'clinic';
+      let staffName = '';
+      let staffRole = '';
+      let treatmentType = '';
 
       if (cat1 === 'clinic' && cat2 === 'all') {
         const mapping = CLINIC_KPI_MAP[item];
@@ -386,6 +468,20 @@ export const DataImporter = {
         const mapped = STAGE_VISIT_MAP[cat2 || ''];
         if (!mapped) continue;
         kpi_name = mapped;
+      } else if (cat1.includes('担当）')) {
+        const parsed = parseStaffCategory(cat1);
+        if (!parsed) continue;
+        // 職種が「その他」でなくても予約枠が混入する医院があるため名前でも除外する
+        // (803医院の'枠外急患'・920医院の'初診'は「予約診療担当）歯科医師」に入っている)
+        if (isNonStaffName(cat2)) continue;
+        const mapping = STAFF_KPI_MAP[item];
+        if (!mapping) continue;
+        kpi_name = mapping.kpi_name;
+        multiply100 = mapping.multiply100;
+        segment = 'staff';
+        staffName = cat2;
+        staffRole = parsed.staffRole;
+        treatmentType = parsed.treatmentType;
       } else {
         continue;
       }
@@ -407,16 +503,16 @@ export const DataImporter = {
           corporation_id: corpId,
           clinic_id: clinicId,
           clinic_name: clinicName,
-          staff_name: '',
+          staff_name: staffName,
           year,
           month,
           date: `${year}-${String(month).padStart(2, '0')}-01`,
-          segment: 'clinic',
+          segment,
           kpi_name,
           value,
           is_target: false,
-          treatment_type: '',
-          staff_role: '',
+          treatment_type: treatmentType,
+          staff_role: staffRole,
         });
       }
     }
@@ -819,6 +915,181 @@ export const DataImporter = {
   // 除外(engine が計算): キャンセル率
   // ※「率」はこのファイル内では "89.45%" のように % 表記 → % を除去してそのまま格納
   // ※ 来院ステージ内訳の項目名・項目数はクリニックごとに異なる（動的取り込み）
+  // 築明会(5UZSCSHH)専用: ドクター別集計CSV（Shift_JIS）
+  // ファイル名: 「クリニックID_ドクター別集計_期間.csv」（clinicId は呼び出し側で抽出）
+  // 列(0始まり): 0:ドクター名 1:新患数 2:再来数 3:保険点数 4:保険請求額 5:保険調整額
+  //   6:保険入金額 7:自費請求額 8:自費調整額 9:自費入金額 10:物品請求額 11:物品入金額
+  //   12:未収精算分 13:返戻金 14:請求額合計 15:入金額合計
+  //
+  // 取得・定義 (2026-07 確定):
+  //   保険売上 = 保険入金額(col6) / 自費売上 = 自費入金額(col9) / 物品売上 = 物品入金額(col11)
+  //   売上(合計) = 保険+自費+物品 … 派生値のためここでは行として持たず、clinic の合計行にのみ '合計売上' を出力
+  //
+  // 行の扱い:
+  //   - 個人行 → segment='staff' / treatment_type=治療セグメント
+  //   - '合計'行 → segment='clinic'（クリニック全体の売上）
+  //   - '物販'行 → 個人配賦しない方針のためスキップ（物販は合計行に含まれる）
+  //
+  // 治療セグメント6分類（ドクター名から判定）:
+  //   矯正=「陣内」/ 専門医=「築山」or「木戸」/ 口腔衛生部=「・三ヶ尻」/ U18=「・渡辺」or 渡辺里香
+  //   / GP=上記以外で「Dr」を含む / 無所属=いずれにも該当しない
+  //
+  // 期間(year/month)は CSV 本文に無いため、ファイル名から抽出して呼び出し側が渡す。
+  transformDrRevenue: (
+    data: string[][],
+    clinicName: string,
+    corpId: string,
+    clinicId: string,
+    year: number,
+    month: number
+  ): any[] => {
+    const date = `${year}-${String(month).padStart(2, '0')}-01`;
+
+    // Shift_JIS で旧字「濵」が化けるケースの補正（GAS 準拠）
+    const normalizeStaffName = (raw: string): string => {
+      let name = raw.trim();
+      if (name.includes('M口')) return '濵口・三ヶ尻';
+      if (name.includes('M田')) return '濵田・三ヶ尻';
+      // 保存用に先頭の「Dr 」を除去（例: 'Dr 三ヶ尻 佳貴' → '三ヶ尻 佳貴'）
+      return name.replace(/^Dr\s+/, '');
+    };
+
+    const determineSegment = (raw: string): string => {
+      const name = raw.trim();
+      if (name.includes('陣内')) return '矯正';
+      if (name.includes('築山') || name.includes('木戸')) return '専門医';
+      if (name.includes('・三ヶ尻')) return '口腔衛生部';
+      if (name.includes('・渡辺')) return 'U18';
+      // 渡辺里香は Dr 表記だが例外的に U18（本人が U18 担当医のため）
+      if (name.replace(/\s/g, '').includes('渡辺里香')) return 'U18';
+      if (name.includes('Dr')) return 'GP';
+      return '無所属';
+    };
+
+    const num = (v: string | undefined): number => {
+      const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const results: any[] = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rawName = (row[0] ?? '').trim();
+      if (!rawName) continue;
+
+      const hoken   = num(row[6]);   // 保険入金額
+      const jihi    = num(row[9]);   // 自費入金額
+      const buppin  = num(row[11]);  // 物品入金額
+
+      if (rawName === '物販') continue; // 個人配賦しない
+
+      if (rawName === '合計') {
+        // クリニック全体の売上
+        const clinicRows: Array<{ kpi_name: string; value: number }> = [
+          { kpi_name: '保険売上', value: hoken },
+          { kpi_name: '自費売上', value: jihi },
+          { kpi_name: '物品売上', value: buppin },
+          { kpi_name: '合計売上', value: hoken + jihi + buppin },
+        ];
+        for (const r of clinicRows) {
+          results.push({
+            corporation_id: corpId,
+            clinic_id:      clinicId,
+            clinic_name:    clinicName,
+            staff_name:     '全体',
+            year,
+            month,
+            date,
+            segment:        'clinic',
+            kpi_name:       r.kpi_name,
+            value:          r.value,
+            is_target:      false,
+            treatment_type: '',
+            staff_role:     '',
+          });
+        }
+        continue;
+      }
+
+      // 個人行
+      const staffName = normalizeStaffName(rawName);
+      const segmentLabel = determineSegment(rawName);
+      const staffRows: Array<{ kpi_name: string; value: number }> = [
+        { kpi_name: '保険売上', value: hoken },
+        { kpi_name: '自費売上', value: jihi },
+        { kpi_name: '物品売上', value: buppin },
+      ];
+      for (const r of staffRows) {
+        results.push({
+          corporation_id: corpId,
+          clinic_id:      clinicId,
+          clinic_name:    clinicName,
+          staff_name:     staffName,
+          year,
+          month,
+          date,
+          segment:        'staff',
+          kpi_name:       r.kpi_name,
+          value:          r.value,
+          is_target:      false,
+          treatment_type: segmentLabel,
+          staff_role:     '',
+        });
+      }
+    }
+    return results;
+  },
+
+  // 稼働率(スタッフ).xlsx → staff_daily_utilization
+  // 列: A:連番 B:clinic_id C:医院名 D:営業日 E:営業時間 F:スタッフ名
+  //     G:診療時間 H:確保時間 I:診療数 J:確保数 K:年月 L:診療稼働率 M:確保稼働率
+  //
+  // 方針 (Notion 5.2):
+  // - 日次のまま格納する（月次化は summarized_staff_utilization ビューで行う）
+  // - L/M列の稼働率は小数第2位に丸められているため取り込まない
+  // - 予約枠・匿名コードは実スタッフではないため除外する
+  transformStaffUtilization: (data: string[][], corpId: string): any[] => {
+    const results: any[] = [];
+    const num = (v: string | undefined): number => {
+      const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row || row.length < 11) continue;
+
+      const clinicId   = String(row[1] ?? '').trim();
+      const clinicName = String(row[2] ?? '').trim();
+      const businessDate = String(row[3] ?? '').trim();
+      const staffName  = String(row[5] ?? '').trim();
+
+      if (!clinicId || !clinicName || !businessDate) continue;
+      if (isNonStaffName(staffName)) continue;
+
+      // parseXlsxAsArray が 'YYYY-MM-DD' に正規化済み
+      const dateMatch = businessDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!dateMatch) continue;
+
+      results.push({
+        corporation_id:    corpId,
+        clinic_id:         clinicId,
+        clinic_name:       clinicName,
+        staff_name:        staffName,
+        business_date:     businessDate,
+        year:              parseInt(dateMatch[1], 10),
+        month:             parseInt(dateMatch[2], 10),
+        business_minutes:  num(row[4]),
+        treatment_minutes: num(row[6]),
+        reserved_minutes:  num(row[7]),
+        treatment_count:   num(row[8]),
+        reserved_count:    num(row[9]),
+      });
+    }
+    return results;
+  },
+
   transformStage: (data: string[][], clinicName: string, corpId: string, clinicId: string): any[] => {
     if (data.length < 4) return [];
 

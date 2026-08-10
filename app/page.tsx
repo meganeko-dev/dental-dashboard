@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
 import { isHiddenClinicById } from '@/lib/hidden-clinics'
+import { usePastComparison } from '@/lib/comparison-settings'
 import { buildMonthRange } from '@/lib/report-kpi'
 
 // 複合グラフの表示期間の起点 (2026-06-17 設定: 2025/1 固定)
@@ -271,7 +272,10 @@ export default function Dashboard() {
   const [selectedYear, setSelectedYear] = useState(currentPeriod.year)
   const [selectedMonth, setSelectedMonth] = useState(currentPeriod.month)
   const [activeTab, setActiveTab] = useState('profitability')
-  
+
+  // 過去対比（前年同月）表示にするか。単独医院法人 + Versus無効化法人(築明会)が該当。
+  const pastComparison = usePastComparison(corpId, mode)
+
   const [goals, setGoals] = useState<Record<string, number>>({})
   const [targetData, setTargetData] = useState<any[]>([])
   const [compData, setCompData] = useState<any[]>([])
@@ -489,7 +493,10 @@ export default function Dashboard() {
             {mode === 'multi' && (
               <>
                 <SelectBox label="対象クリニック" value={targetClinic} onChange={setTargetClinic} options={clinics} highlight />
-                <SelectBox label="比較対象" value={compareClinic} onChange={setCompareClinic} options={clinics} />
+                {/* 過去対比表示の法人では比較対象プルダウンを出さない (Notion P0-2) */}
+                {!pastComparison && (
+                  <SelectBox label="比較対象" value={compareClinic} onChange={setCompareClinic} options={clinics} />
+                )}
               </>
             )}
           </div>
@@ -558,8 +565,8 @@ export default function Dashboard() {
             const compClinicVal = calcClinicCardValue(compRow,    compRawData,     kpi.id);
             const goal = goals[kpi.label] || 0;
 
-            const finalCompVal   = mode === 'single' ? lastYearVal : compClinicVal;
-            const finalCompLabel = mode === 'single' ? '前年同月' : compareClinic;
+            const finalCompVal   = pastComparison ? lastYearVal : compClinicVal;
+            const finalCompLabel = pastComparison ? '前年同月' : compareClinic;
 
             const mom         = KpiEngine.calcRatio(val, prevVal);
             const achievement = KpiEngine.calcRatio(val, goal);
