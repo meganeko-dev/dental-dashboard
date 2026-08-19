@@ -182,6 +182,8 @@ export const KpiEngine = {
       case 'private_amount':            return g('private_amount');
       case 'private_avg_price_per_day':
       case 'avg_private_price_per_day': return g('working_days') > 0 ? g('private_amount') / g('working_days') : 0;
+      // 自費率: CSV由来の '自費率'(新心会) があればそれ、無ければ 自費売上/合計売上 をビュー側で算出
+      case 'private_rate':              return g('private_rate');
       case 'recept_count':              return g('recept_count');
       case 'recept_price':              return g('recept_count') > 0 ? g('total_amount') / g('recept_count') : 0;
       case 'avg_price':                 return g('patients_count') > 0 ? g('total_amount') / g('patients_count') : 0;

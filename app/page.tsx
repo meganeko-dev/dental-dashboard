@@ -97,8 +97,6 @@ const CLINIC_RAW_KPIS = [
   '来院人数_既存患者',
   // 2026-05-28 追加: 新患未予約数 / 新患未予約率 用
   '新患未予約数',
-  // 2026-06-17 追加: 収益性タブの自費率カード用 (TN32FBH8専用 CSV 由来)
-  '自費率',
 ]
 
 const RAW_CLINIC_KPI_IDS = new Set([
@@ -116,7 +114,6 @@ const RAW_CLINIC_KPI_IDS = new Set([
   'maintenance_churn_count',
   'maintenance_churn_rate',
   'reserved_rate',
-  'private_rate',
 ])
 
 const RATE_KEYS = new Set([
@@ -187,8 +184,6 @@ const calcClinicRawKpi = (rows: any[], kpiId: string) => {
     }
     case 'reserved_rate':
       return toPercentValue(sumRawKpi(rows, '予約率'))
-    case 'private_rate':
-      return sumRawKpi(rows, '自費率')
     default:
       return 0
   }
