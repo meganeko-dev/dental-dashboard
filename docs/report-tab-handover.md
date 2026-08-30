@@ -91,11 +91,12 @@
 | `summarized_clinic_kpi` | 既存、変更なし | 有効 | |
 | `flexible_kpis_stage_breakdown_distinct` | **新規VIEW（2026-05-09作成）** | invoker | flexible_kpis の `来院人数_ステージ内訳_%` の DISTINCT(corporation_id, clinic_name, kpi_name) を返す。Admin メンテナンス設定UIで選択肢取得に利用（distinct 生クエリの 1000 行制限回避） |
 | `v_patient_demographics_summary` | **新規VIEW（2026-05-14作成）** | invoker | patient_snapshots を (corporation_id, clinic_id) 単位で集計し、男女別カウントと年齢9バケットを返す。フィルタ: last_visit_date >= 2025-01-01。レポートタブ男女比/年齢構成チャートのデータ源 |
-| `kpi_sheet_sources` | 既存、**RLS 無効**（advisor 警告） | **無効** | ⚠ 別途修正要（後述） |
+| `kpi_sheet_sources` | 既存 | 有効 | 2026-08-30 に RLS 有効化＋SELECT ポリシー追加（下記 3-4 参照） |
 
 ### 3-2. 適用済みマイグレーション
 1. `create_patient_snapshots` — テーブル本体 + SELECT ポリシー
 2. `patient_snapshots_write_policies` — 自法人配下に INSERT / DELETE のポリシー追加
+3. `enable_rls_kpi_sheet_sources` — `kpi_sheet_sources` の RLS 有効化 + SELECT ポリシー（2026-08-30 適用）
 
 ### 3-3. patient_snapshots スキーマ要点
 - **PK**: `id` (uuid, gen_random_uuid()) — 2026-05-14 改定。同一カルテ番号の重複行を許容するため uuid PK に変更
@@ -106,12 +107,29 @@
 - **カラム**: Notion 5-4 のフルセット（visit_status, maintenance_status, dr_name, dh_name, gender, age, tags, first_visit_date, last_visit_date, next_reserve_date, maintenance_count, visit_count, cancel_count, prior_cancel_count, churn_flag 他）
 - **RLS ポリシー**: `corporation_id IN (SELECT corporation_id FROM profiles WHERE id = auth.uid())` で SELECT/INSERT/DELETE。UPDATE は未許可（運用上 DELETE/INSERT のみ）
 
-### 3-4. ⚠ Advisor 警告（未対応）
-`public.kpi_sheet_sources` が RLS 無効のまま全公開。今回のスコープ外だが、別タスクで以下を実施推奨:
+### 3-4. Advisor 警告（2026-08-30 対応済み）
+`public.kpi_sheet_sources` は RLS 無効のまま全公開だったため、マイグレーション `enable_rls_kpi_sheet_sources` で対応済み。
+
 ```sql
 ALTER TABLE public.kpi_sheet_sources ENABLE ROW LEVEL SECURITY;
--- 続けて authenticated ユーザーが SELECT 可能などのポリシーを追加（無いと完全閉塞する）
+
+CREATE POLICY kpi_sheet_sources_select_own_corp
+  ON public.kpi_sheet_sources
+  FOR SELECT TO authenticated
+  USING (
+    corporation_id IN (
+      SELECT p.corporation_id FROM public.profiles p WHERE p.id = auth.uid()
+    )
+  );
 ```
+
+方針:
+- `anon` はポリシーを 1 つも作らず**全操作を拒否**（適用後に `set role anon` で可視 0 行を確認済み）
+- `authenticated` は**自法人の行の SELECT のみ**（将来 admin 画面から参照する余地を残す）
+- 書き込み（INSERT/UPDATE/DELETE）のポリシーは意図的に作らない。登録は service_role か Supabase ダッシュボードから行う
+- 取り込みスクリプト `scripts/import-sheet-kpis.mjs` は service_role キー使用（RLS バイパス）のため**影響なし**。アプリ側 (`app/` `lib/` `components/`) にこのテーブルの参照は無い
+
+SQL 全文: `docs/rls-kpi-sheet-sources.sql`
 
 ---
 
@@ -222,7 +240,7 @@ WHERE table_name = 'patient_snapshots' AND column_name LIKE '%karte%';
 
 | # | 内容 | 対応方針 |
 |---|---|---|
-| 8-1 | `kpi_sheet_sources` の RLS が無効（advisor 警告） | 別タスク。本タブとは独立 |
+| 8-1 | ~~`kpi_sheet_sources` の RLS が無効（advisor 警告）~~ | **2026-08-30 対応済み**（マイグレーション `enable_rls_kpi_sheet_sources`、§3-4 参照） |
 | 8-2 | 既存 TS エラー（`app/page.tsx`, `app/staff/page.tsx`, `MappingManager.tsx`, `AuthContext.tsx`） | 本タブ着手時から存在、本作業範囲外 |
 | 8-3 | Vercel 本番デプロイ時に `KARTE_HASH_SECRET` の手動追加が必要 | デプロイ手順書に追記推奨 |
 | 8-4 | 過去にアップ済みの日別状況CSVは新KPI を含まない | 該当法人のCSVを再アップロードで補完 |
