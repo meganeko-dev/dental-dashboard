@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// メンバーリスト（スタッフ一覧）CSV を staff_members へ取り込むための SQL を生成する。
+// メンバーリスト（スタッフ一覧）の CSV / xlsx を staff_members へ取り込むための SQL を生成する。
 //
 // 使い方:
 //   # Step 1: CSV に出てくる所属クリニック名を一覧する（--clinics 無しで実行）
@@ -14,6 +14,7 @@
 //   --clinics <path>     クリニック定義 JSON。省略すると Step 1 モード
 //   --out <path>         生成 SQL の出力先。省略すると標準出力
 //   --profile <name>     列マッピングのプロファイル名。省略時は法人 ID から自動選択
+//   --sheet <name>       xlsx のシート名。省略すると全シートを連結して読む
 //   --allow-unresolved   クリニック名が解決できない行があっても SQL を生成する（既定は中断）
 //
 // clinics.json の形式（Supabase から取得して渡す。詳細は
@@ -31,6 +32,7 @@
 //   - プロファイルに無い CSV 列は捨てずに extra_info(JSONB) へ格納する
 
 import { readFileSync, writeFileSync } from 'node:fs'
+import { inflateRawSync } from 'node:zlib'
 
 // ---- 列マッピングのプロファイル ----
 // 法人ごとに CSV のフォーマットが違うため、ここに追加していく。
@@ -75,12 +77,162 @@ const corporationId  = flag('corporation')
 const clinicsPath    = flag('clinics')
 const outPath        = flag('out')
 const profileName    = flag('profile')
+const sheetName      = flag('sheet')
 const allowUnresolved = has('allow-unresolved')
 
 const die = (msg) => { console.error(`[error] ${msg}`); process.exit(2) }
 
 if (!csvPath)       die('CSV ファイルのパスを指定してください')
 if (!corporationId) die('--corporation <法人ID> は必須です')
+
+// ---- xlsx リーダ（依存ライブラリなし。ZIP を自前で展開して XML を読む）----
+// 人事システムからの書き出しが xlsx のことが多いため、CSV に変換せず直接読めるようにしている。
+const unzip = (buf) => {
+  // End of Central Directory を末尾から探す
+  let eocd = -1
+  for (let i = buf.length - 22; i >= 0 && i > buf.length - 66000; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break }
+  }
+  if (eocd < 0) throw new Error('ZIP の End of Central Directory が見つかりません')
+  const count = buf.readUInt16LE(eocd + 10)
+  let p = buf.readUInt32LE(eocd + 16)
+  const files = new Map()
+  for (let n = 0; n < count; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('ZIP セントラルディレクトリが壊れています')
+    const method   = buf.readUInt16LE(p + 10)
+    const nameLen  = buf.readUInt16LE(p + 28)
+    const extraLen = buf.readUInt16LE(p + 30)
+    const cmtLen   = buf.readUInt16LE(p + 32)
+    const offset   = buf.readUInt32LE(p + 42)
+    const name     = buf.toString('utf8', p + 46, p + 46 + nameLen)
+    // ローカルヘッダ側の可変長は中央ディレクトリと異なることがあるので読み直す
+    const lNameLen  = buf.readUInt16LE(offset + 26)
+    const lExtraLen = buf.readUInt16LE(offset + 28)
+    const dataStart = offset + 30 + lNameLen + lExtraLen
+    const compSize  = buf.readUInt32LE(p + 20)
+    const raw = buf.subarray(dataStart, dataStart + compSize)
+    files.set(name, method === 8 ? inflateRawSync(raw) : Buffer.from(raw))
+    p += 46 + nameLen + extraLen + cmtLen
+  }
+  return files
+}
+
+const xmlUnescape = (s) => s
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+  .replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+  .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+  .replace(/&amp;/g, '&')
+
+const colIndex = (ref) => {
+  let n = 0
+  for (const ch of ref.replace(/[^A-Z]/g, '')) n = n * 26 + (ch.charCodeAt(0) - 64)
+  return n - 1
+}
+
+// Excel のシリアル値を YYYY/MM/DD に。1900年うるう年バグの仕様に合わせ 1899-12-30 起点
+const serialToDate = (n) => {
+  const ms = Math.round((n - 25569) * 86400000)
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return String(n)
+  return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
+const parseXlsx = (buf, wantSheet) => {
+  const files = unzip(buf)
+  const text = (n) => files.has(n) ? files.get(n).toString('utf8') : null
+
+  // 共有文字列
+  const shared = []
+  const ss = text('xl/sharedStrings.xml')
+  if (ss) for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    shared.push([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => xmlUnescape(x[1])).join(''))
+  }
+
+  // 日付書式が当たっている styleId を集める
+  const styles = text('xl/styles.xml') ?? ''
+  const customFmt = new Map()
+  for (const m of styles.matchAll(/<numFmt[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g)) customFmt.set(+m[1], xmlUnescape(m[2]))
+  const builtinDate = new Set([14,15,16,17,22,27,30,36,45,46,47,50,57,58])
+  const dateStyles = new Set()
+  const xfsBlock = styles.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/)
+  if (xfsBlock) {
+    let i = 0
+    for (const m of xfsBlock[1].matchAll(/<xf\b[^>]*>/g)) {
+      const fid = +(m[0].match(/numFmtId="(\d+)"/)?.[1] ?? 0)
+      const code = customFmt.get(fid) ?? ''
+      if (builtinDate.has(fid) || /yy|mm|dd|y\/m|m\/d/.test(code)) dateStyles.add(i)
+      i++
+    }
+  }
+
+  // シート名 -> シートXML
+  const wbRels = text('xl/_rels/workbook.xml.rels') ?? ''
+  const relTarget = new Map()
+  for (const m of wbRels.matchAll(/<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"/g)) relTarget.set(m[1], m[2])
+  const wb = text('xl/workbook.xml') ?? ''
+  const sheets = []
+  for (const m of wb.matchAll(/<sheet\b[^>]*>/g)) {
+    const name = xmlUnescape(m[0].match(/name="([^"]*)"/)?.[1] ?? '')
+    const rid  = m[0].match(/r:id="([^"]*)"/)?.[1]
+    let tgt = relTarget.get(rid) ?? ''
+    tgt = tgt.replace(/^\//, '')
+    if (!tgt.startsWith('xl/')) tgt = 'xl/' + tgt
+    sheets.push({ name, path: tgt })
+  }
+  if (!sheets.length) throw new Error('xlsx にシートが見つかりません')
+
+  const parseSheet = (path) => {
+    const xml = text(path)
+    if (xml === null) throw new Error(`シート XML が読めません: ${path}`)
+    const rows = []
+    for (const rm of xml.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+      const cells = new Map()
+      for (const cm of (rm[1] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const attrs = cm[1], inner = cm[2] ?? ''
+        const ref = attrs.match(/r="([A-Z]+\d+)"/)?.[1]
+        if (!ref) continue
+        const t = attrs.match(/t="([^"]*)"/)?.[1]
+        const sIdx = attrs.match(/s="(\d+)"/)?.[1]
+        let val = ''
+        if (t === 'inlineStr') {
+          val = [...inner.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => xmlUnescape(x[1])).join('')
+        } else {
+          const v = inner.match(/<v>([\s\S]*?)<\/v>/)?.[1]
+          if (v !== undefined) {
+            if (t === 's') val = shared[+v] ?? ''
+            else {
+              val = xmlUnescape(v)
+              if (sIdx !== undefined && dateStyles.has(+sIdx) && val !== '') val = serialToDate(Number(val))
+              // Excel は整数でも "25.0" のように書き出すことがある。社員番号がこの形で入るため
+              // 整数として表せる値は小数部を落とす（"25.5" のような真の小数はそのまま）。
+              else if (/^-?\d+\.0+$/.test(val)) val = String(Number(val))
+            }
+          }
+        }
+        cells.set(colIndex(ref), val)
+      }
+      if (!cells.size) { rows.push([]); continue }
+      const max = Math.max(...cells.keys())
+      rows.push(Array.from({ length: max + 1 }, (_, i) => cells.get(i) ?? ''))
+    }
+    return rows.filter(r => r.some(c => String(c).trim() !== ''))
+  }
+
+  if (wantSheet) {
+    const hit = sheets.find(s => s.name === wantSheet)
+    if (!hit) throw new Error(`シート '${wantSheet}' が見つかりません。存在するシート: ${sheets.map(s => s.name).join(' , ')}`)
+    return { sheetNames: sheets.map(s => s.name), rows: parseSheet(hit.path) }
+  }
+  // シート指定が無ければ全シートを縦に連結（先頭シートのヘッダを使い、2枚目以降はヘッダ行を捨てる）
+  const all = []
+  const perSheet = []
+  for (const [i, sh] of sheets.entries()) {
+    const rows = parseSheet(sh.path)
+    perSheet.push({ name: sh.name, count: Math.max(0, rows.length - 1) })
+    all.push(...(i === 0 ? rows : rows.slice(1)))
+  }
+  return { sheetNames: sheets.map(s => s.name), rows: all, perSheet }
+}
 
 // ---- CSV パーサ（RFC4180 準拠の最小実装。BOM / CRLF / 引用符内の改行に対応）----
 const parseCsv = (text) => {
@@ -152,16 +304,28 @@ const pickProfile = (headers) => {
 }
 
 // ---- 読み込み ----
-let rows
-try { rows = parseCsv(readFileSync(csvPath, 'utf8')) }
-catch (e) { die(`CSV を読めません: ${csvPath}\n${e.message}`) }
-if (rows.length < 2) die('CSV にデータ行がありません')
+const isXlsx = /\.xlsx$/i.test(csvPath)
+let rows, sheetInfo = null
+try {
+  if (isXlsx) {
+    const r = parseXlsx(readFileSync(csvPath), sheetName)
+    rows = r.rows
+    sheetInfo = r
+  } else {
+    rows = parseCsv(readFileSync(csvPath, 'utf8'))
+  }
+} catch (e) { die(`ファイルを読めません: ${csvPath}\n${e.message}`) }
+if (rows.length < 2) die('データ行がありません')
 
 const headers = rows[0].map(h => h.trim())
 const records = rows.slice(1).map(r => Object.fromEntries(headers.map((h, i) => [h, (r[i] ?? '').trim()])))
 const profile = pickProfile(headers)
 
-console.error(`[info] CSV        : ${csvPath}`)
+console.error(`[info] 入力        : ${csvPath}`)
+if (sheetInfo) {
+  console.error(`[info] シート      : ${sheetInfo.sheetNames.join(' , ')}${sheetName ? ` （${sheetName} のみ読み込み）` : ' （全シート連結）'}`)
+  if (sheetInfo.perSheet) for (const p of sheetInfo.perSheet) console.error(`[info]   ${p.name}: ${p.count} 行`)
+}
 console.error(`[info] 法人        : ${corporationId}`)
 console.error(`[info] プロファイル: ${profile.label}`)
 console.error(`[info] データ行数  : ${records.length}`)
