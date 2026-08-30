@@ -92,11 +92,18 @@
 | `flexible_kpis_stage_breakdown_distinct` | **新規VIEW（2026-05-09作成）** | invoker | flexible_kpis の `来院人数_ステージ内訳_%` の DISTINCT(corporation_id, clinic_name, kpi_name) を返す。Admin メンテナンス設定UIで選択肢取得に利用（distinct 生クエリの 1000 行制限回避） |
 | `v_patient_demographics_summary` | **新規VIEW（2026-05-14作成）** | invoker | patient_snapshots を (corporation_id, clinic_id) 単位で集計し、男女別カウントと年齢9バケットを返す。フィルタ: last_visit_date >= 2025-01-01。レポートタブ男女比/年齢構成チャートのデータ源 |
 | `kpi_sheet_sources` | 既存 | 有効 | 2026-08-30 に RLS 有効化＋SELECT ポリシー追加（下記 3-4 参照） |
+| `staff_members` | **新規（2026-08-31作成）** | 有効 | スタッフマスタ。1行 = 1人 × 1所属クリニック。応援先は affiliation=support の行。取込は UPSERT |
+| `staff_name_aliases` | **新規（2026-08-31作成）** | 有効 | CSV のスタッフ名原文 → staff_members の対応表。confirmed / pending / non_staff |
 
 ### 3-2. 適用済みマイグレーション
 1. `create_patient_snapshots` — テーブル本体 + SELECT ポリシー
 2. `patient_snapshots_write_policies` — 自法人配下に INSERT / DELETE のポリシー追加
 3. `enable_rls_kpi_sheet_sources` — `kpi_sheet_sources` の RLS 有効化 + SELECT ポリシー（2026-08-30 適用）
+4. `create_staff_members_and_aliases` — メンバーリスト2テーブル（2026-08-31 適用）
+5. `staff_alias_revert_to_pending_on_staff_delete` — スタッフ削除時にエイリアスを pending へ戻すトリガ（2026-08-31 適用）
+
+up/down SQL: `docs/migrations/2026-08-31_staff_members_up.sql` / `..._down.sql`
+運用手順: `.claude/skills/member-list-import/SKILL.md`
 
 ### 3-3. patient_snapshots スキーマ要点
 - **PK**: `id` (uuid, gen_random_uuid()) — 2026-05-14 改定。同一カルテ番号の重複行を許容するため uuid PK に変更
